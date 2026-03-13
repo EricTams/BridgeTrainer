@@ -1,0 +1,16 @@
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Editors
+.vscode/
+!.vscode/settings.json
+*.swp
+*.swo
+
+# Dependencies
+node_modules/
+
+# Misc
+*.log
