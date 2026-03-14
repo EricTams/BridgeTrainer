@@ -141,7 +141,7 @@ This applies across all steps.
 
 ## Step 10: Opener Rebids
 
-- [ ] `src/engine/rebid.js` -- Opener's second bid after hearing responder:
+- [x] `src/engine/rebid.js` -- Opener's second bid after hearing responder:
   - Minimum (13-15) vs invitational (16-18) vs game-forcing (19+) rebids
   - Rebid own suit, raise partner, new suit, NT rebids
   - After Stayman: show major or deny

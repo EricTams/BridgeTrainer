@@ -196,8 +196,8 @@ function scorePass(bid, eval_, seatPos) {
     pen(p, `${hcp} HCP above pass limit (${PASS_HCP_LIMIT})`, Math.max(0, hcp - PASS_HCP_LIMIT) * HCP_COST);
   }
   if (seatPos !== 4) {
-    const maxLen = Math.max(...shape);
-    pen(p, `${maxLen}-card suit worth bidding`, Math.max(0, maxLen - PASS_SUIT_LIMIT) * LONG_SUIT_PASS_COST);
+    const effLen = biddableLongSuitLen(shape);
+    pen(p, `${effLen}-card suit worth bidding`, Math.max(0, effLen - PASS_SUIT_LIMIT) * LONG_SUIT_PASS_COST);
   }
   return scored(bid, deduct(penTotal(p)), passExplanation(hcp, shape, r15Skip, penTotal(p)), p);
 }
@@ -205,9 +205,9 @@ function scorePass(bid, eval_, seatPos) {
 function passExplanation(hcp, shape, r15Skip, penalty) {
   if (r15Skip) return `4th seat, Rule of 15 not met (${hcp + shape[0]}): pass`;
   if (penalty < 0.5) return `${hcp} HCP: correct to pass`;
-  const maxLen = Math.max(...shape);
-  if (maxLen > PASS_SUIT_LIMIT && hcp <= PASS_HCP_LIMIT) {
-    return `${hcp} HCP but ${maxLen}-card suit: consider bidding`;
+  const effLen = biddableLongSuitLen(shape);
+  if (effLen > PASS_SUIT_LIMIT && hcp <= PASS_HCP_LIMIT) {
+    return `${hcp} HCP but ${effLen}-card suit: consider bidding`;
   }
   return `${hcp} HCP: ${hcp - PASS_HCP_LIMIT} above pass threshold`;
 }
@@ -467,6 +467,22 @@ function hasSuitQuality(hand, strain) {
     if (card.rank >= Rank.TEN) honors++;
   }
   return honors >= WEAK_TWO_MIN_HONORS;
+}
+
+/**
+ * Effective longest suit length for the pass penalty.
+ * 2♣ is artificial (strong) in SAYC, so a 6-card club suit below
+ * preempt length doesn't open up a weak-two option the way other
+ * suits do.  Use the longest non-club suit in that case.
+ * @param {number[]} shape -- [spades, hearts, diamonds, clubs]
+ * @returns {number}
+ */
+function biddableLongSuitLen(shape) {
+  const maxLen = Math.max(...shape);
+  if (shape[3] >= maxLen && shape[3] < PREEMPT_MIN_LENGTH) {
+    return Math.max(shape[0], shape[1], shape[2]);
+  }
+  return maxLen;
 }
 
 /** @param {number} hcp @param {number[]} shape @returns {boolean} */

@@ -2,6 +2,7 @@ import { deal, SEATS } from '../model/deal.js';
 import { createAuction, addBid, pass, Strain } from '../model/bid.js';
 import { evaluate } from '../engine/evaluate.js';
 import { getOpeningBids } from '../engine/opening.js';
+import { getRespondingBids } from '../engine/responding.js';
 import { seatPosition } from '../engine/context.js';
 
 /**
@@ -12,7 +13,7 @@ import { seatPosition } from '../engine/context.js';
  *   hands: Deal,
  *   auction: Auction,
  *   dealer: Seat,
- *   type: 'opening' | 'responding',
+ *   type: 'opening' | 'responding' | 'rebid',
  * }} Puzzle
  */
 
@@ -26,13 +27,14 @@ const MAX_REDEAL_ATTEMPTS = 50;
 const MIN_OPENING_PRIORITY = 7;
 
 /**
- * Generate a random puzzle (opening or responding, 50/50).
+ * Generate a random puzzle (opening, responding, or rebid).
  * @returns {Puzzle}
  */
 export function generatePuzzle() {
-  return Math.random() < 0.5
-    ? generateOpeningPuzzle()
-    : generateRespondingPuzzle();
+  const r = Math.random();
+  if (r < 0.33) return generateOpeningPuzzle();
+  if (r < 0.66) return generateRespondingPuzzle();
+  return generateRebidPuzzle();
 }
 
 /**
@@ -111,6 +113,62 @@ function pickRandomDealer() {
 /** @returns {Seat} */
 function pickRespondingDealer() {
   return RESPONDING_DEALERS[Math.floor(Math.random() * RESPONDING_DEALERS.length)];
+}
+
+/**
+ * Generate a rebid puzzle where South opens, North responds, and South rebids.
+ * Redeals until both South has a clear 1-level opening and North has a clear
+ * non-pass response. Falls back to an opening puzzle after MAX_REDEAL_ATTEMPTS.
+ * @returns {Puzzle}
+ */
+export function generateRebidPuzzle() {
+  for (let i = 0; i < MAX_REDEAL_ATTEMPTS; i++) {
+    const result = tryRebidDeal();
+    if (result) return result;
+  }
+  return generateOpeningPuzzle();
+}
+
+/**
+ * Attempt to build a rebid puzzle from a single deal.
+ * @returns {Puzzle | null}
+ */
+function tryRebidDeal() {
+  const hands = deal();
+  const dealer = pickRandomDealer();
+
+  const southPos = seatPosition(dealer, PLAYER_SEAT);
+  const southEval = evaluate(hands[PLAYER_SEAT]);
+  const openingRecs = getOpeningBids(hands[PLAYER_SEAT], southEval, southPos);
+  if (openingRecs.length === 0) return null;
+  const topOpening = openingRecs[0];
+  if (topOpening.bid.type !== 'contract') return null;
+  if (topOpening.bid.level !== 1) return null;
+  if (topOpening.priority < MIN_OPENING_PRIORITY) return null;
+
+  let auction = createAuction(dealer);
+  const passesToSouth = passesBeforeSeat(dealer, PLAYER_SEAT);
+  for (let i = 0; i < passesToSouth; i++) {
+    auction = addBid(auction, pass());
+  }
+  auction = addBid(auction, topOpening.bid);
+
+  auction = addBid(auction, pass());
+
+  const northEval = evaluate(hands[PARTNER_SEAT]);
+  const respRecs = getRespondingBids(
+    hands[PARTNER_SEAT], northEval, /** @type {import('../model/bid.js').ContractBid} */ (topOpening.bid));
+  if (respRecs.length === 0) return null;
+  const topResp = respRecs[0];
+  if (topResp.bid.type !== 'contract') return null;
+  if (topResp.bid.level > 3) return null;
+  if (topResp.priority < MIN_OPENING_PRIORITY) return null;
+
+  auction = addBid(auction, topResp.bid);
+
+  auction = addBid(auction, pass());
+
+  return { hands, auction, dealer, type: 'rebid' };
 }
 
 /**

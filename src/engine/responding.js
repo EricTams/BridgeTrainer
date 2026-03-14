@@ -43,6 +43,7 @@ const RESP_2NT_MAX = 15;
 const JUMP_SHIFT_MIN = 19;
 const JUMP_SHIFT_MIN_LEN = 5;
 const LONG_SUIT_THRESHOLD = 6;
+const RESP_LONG_SUIT_DISCOUNT = 2;
 
 // ── 1NT Response thresholds ─────────────────────────────────────────
 
@@ -151,12 +152,17 @@ function scorePass(bid, eval_) {
     pen(p, `${hcp} HCP, enough to respond (${RESP_MIN_HCP}+)`, (hcp - RESP_MIN_HCP + 1) * PASS_HCP_COST);
   }
   const maxLen = Math.max(...shape);
-  if (maxLen >= LONG_SUIT_THRESHOLD && hcp >= RESP_MIN_HCP) {
+  if (maxLen >= LONG_SUIT_THRESHOLD) {
     pen(p, `${maxLen}-card suit worth bidding`, (maxLen - LONG_SUIT_THRESHOLD + 1) * LONG_SUIT_PASS_COST);
   }
-  const expl = hcp < RESP_MIN_HCP
-    ? `${hcp} HCP: correct to pass`
-    : `${hcp} HCP: enough to respond (${RESP_MIN_HCP}+ needed)`;
+  let expl;
+  if (maxLen >= LONG_SUIT_THRESHOLD && hcp < RESP_MIN_HCP) {
+    expl = `${hcp} HCP but ${maxLen}-card suit: consider bidding`;
+  } else if (hcp < RESP_MIN_HCP) {
+    expl = `${hcp} HCP: correct to pass`;
+  } else {
+    expl = `${hcp} HCP: enough to respond (${RESP_MIN_HCP}+ needed)`;
+  }
   return scored(bid, deduct(penTotal(p)), expl, p);
 }
 
@@ -172,23 +178,25 @@ function scoreNewSuit1(bid, eval_, ps) {
   const strain = /** @type {import('../model/bid.js').ContractBid} */ (bid).strain;
   const len = suitLen(shape, strain);
   const name = STRAIN_DISPLAY[strain];
+  const hcpMin = adjustedRespMin(len);
 
   /** @type {PenaltyItem[]} */
   const p = [];
-  pen(p, `${hcp} HCP, need ${RESP_MIN_HCP}+`, Math.max(0, RESP_MIN_HCP - hcp) * HCP_COST);
+  pen(p, `${hcp} HCP, need ${hcpMin}+`, Math.max(0, hcpMin - hcp) * HCP_COST);
   pen(p, `${len} ${name}, need ${NEW_SUIT_MIN_LEN}+`, Math.max(0, NEW_SUIT_MIN_LEN - len) * LENGTH_SHORT_COST);
   pen(p, 'Better suit available', suitPrefCost(strain, shape, ps));
   pen(p, 'Major raise available', majorRaiseAvailCost(ps, shape, hcp));
 
-  return scored(bid, deduct(penTotal(p)), newSuit1Expl(hcp, len, strain), p);
+  return scored(bid, deduct(penTotal(p)), newSuit1Expl(hcp, len, strain, hcpMin), p);
 }
 
-/** @param {number} hcp @param {number} len @param {import('../model/bid.js').Strain} strain */
-function newSuit1Expl(hcp, len, strain) {
+/** @param {number} hcp @param {number} len @param {import('../model/bid.js').Strain} strain @param {number} hcpMin */
+function newSuit1Expl(hcp, len, strain, hcpMin) {
   const sym = STRAIN_SYMBOLS[strain];
   const name = STRAIN_DISPLAY[strain];
   if (len < NEW_SUIT_MIN_LEN) return `${len} ${name}: need ${NEW_SUIT_MIN_LEN}+ for 1${sym}`;
-  if (hcp < RESP_MIN_HCP) return `${hcp} HCP: not enough to respond`;
+  if (hcp < hcpMin) return `${hcp} HCP: not enough to respond (need ${hcpMin}+)`;
+  if (hcpMin < RESP_MIN_HCP) return `${len} ${name} compensates for ${hcp} HCP: bid 1${sym}`;
   return `${hcp} HCP with ${len} ${name}: bid 1${sym}`;
 }
 
@@ -690,6 +698,18 @@ function isMajor(strain) {
  */
 function ranksAbove(a, b) {
   return STRAIN_ORDER.indexOf(a) > STRAIN_ORDER.indexOf(b);
+}
+
+/**
+ * Adjusted minimum HCP for a 1-level new suit response.
+ * Long suits (6+) reduce the requirement: each card above 5 discounts by
+ * RESP_LONG_SUIT_DISCOUNT HCP.
+ * @param {number} suitLength
+ * @returns {number}
+ */
+function adjustedRespMin(suitLength) {
+  const discount = Math.max(0, suitLength - 5) * RESP_LONG_SUIT_DISCOUNT;
+  return Math.max(0, RESP_MIN_HCP - discount);
 }
 
 /** Distance in HCP from the ideal range (0 if within range). */

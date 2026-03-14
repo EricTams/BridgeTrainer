@@ -5,7 +5,8 @@ import { bidToString } from '../model/bid.js';
  * @typedef {import('../engine/opening.js').BidRecommendation} BidRecommendation
  */
 
-const MAX_RECS_SHOWN = 3;
+const MAX_RECS_SHOWN = 5;
+const MIN_RECS_SHOWN = 3;
 const MIN_DISPLAY_PRIORITY = 4;
 
 const SCORE_CLASSES = [
@@ -121,7 +122,9 @@ function buildRecsSection(recs) {
   section.appendChild(heading);
 
   const viable = recs.filter(r => r.priority >= MIN_DISPLAY_PRIORITY);
-  const shown = viable.slice(0, MAX_RECS_SHOWN);
+  const shown = viable.length >= MIN_RECS_SHOWN
+    ? viable.slice(0, MAX_RECS_SHOWN)
+    : recs.slice(0, MIN_RECS_SHOWN);
 
   for (const rec of shown) {
     section.appendChild(recRow(rec));

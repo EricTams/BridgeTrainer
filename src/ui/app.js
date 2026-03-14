@@ -19,7 +19,8 @@ import { renderResult } from './result-display.js';
 
 const PLAYER_SEAT = /** @type {import('../model/deal.js').Seat} */ ('S');
 const SEAT_NAMES = { N: 'North', E: 'East', S: 'South', W: 'West' };
-const ADVISOR_TOP_N = 3;
+const ADVISOR_TOP_N = 5;
+const ADVISOR_MIN_SHOWN = 3;
 const ADVISOR_MIN_PRIORITY = 4;
 
 /**
@@ -157,7 +158,9 @@ function renderTools(hand, auction, isBidding, advisorExpanded, onNewDeal, onTog
 function buildAdvisorList(hand, auction) {
   const recs = getRecommendations(hand, auction, PLAYER_SEAT);
   const viable = recs.filter(r => r.priority >= ADVISOR_MIN_PRIORITY);
-  const shown = viable.slice(0, ADVISOR_TOP_N);
+  const shown = viable.length >= ADVISOR_MIN_SHOWN
+    ? viable.slice(0, ADVISOR_TOP_N)
+    : recs.slice(0, ADVISOR_MIN_SHOWN);
 
   const list = el('div', 'advisor-list');
   for (const rec of shown) {
@@ -190,7 +193,7 @@ function buildAdvisorList(hand, auction) {
 /**
  * @param {number} pos
  * @param {import('../model/deal.js').Seat} dealer
- * @param {'opening' | 'responding'} puzzleType
+ * @param {'opening' | 'responding' | 'rebid'} puzzleType
  * @param {HTMLElement} container
  */
 function renderPositionInfo(pos, dealer, puzzleType, container) {
@@ -198,9 +201,10 @@ function renderPositionInfo(pos, dealer, puzzleType, container) {
   container.className = 'position-info';
 
   const ordinal = ['', '1st', '2nd', '3rd', '4th'][pos];
-  const typeLabel = puzzleType === 'responding'
-    ? 'Responding'
-    : `Opening (${ordinal} seat)`;
+  let typeLabel;
+  if (puzzleType === 'responding') typeLabel = 'Responding';
+  else if (puzzleType === 'rebid') typeLabel = 'Opener Rebid';
+  else typeLabel = `Opening (${ordinal} seat)`;
   container.textContent = `${typeLabel} \u00B7 Dealer: ${SEAT_NAMES[dealer]}`;
 }
 

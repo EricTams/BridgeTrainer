@@ -48,6 +48,23 @@ export function seatPosition(dealer, seat) {
 }
 
 /**
+ * Find the first contract bid made by the given seat.
+ * @param {Auction} auction
+ * @param {Seat} playerSeat
+ * @returns {import('../model/bid.js').ContractBid | null}
+ */
+export function findOwnBid(auction, playerSeat) {
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  for (let i = 0; i < auction.bids.length; i++) {
+    const seat = SEATS[(dealerIdx + i) % SEATS.length];
+    if (seat === playerSeat && auction.bids[i].type === 'contract') {
+      return /** @type {import('../model/bid.js').ContractBid} */ (auction.bids[i]);
+    }
+  }
+  return null;
+}
+
+/**
  * Find the first contract bid made by a given seat's partner.
  * @param {Auction} auction
  * @param {Seat} playerSeat
