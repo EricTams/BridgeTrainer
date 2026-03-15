@@ -153,7 +153,7 @@ This applies across all steps.
 
 ## Step 11: Responses to 2C and Weak Twos
 
-- [ ] Extend `src/engine/responding.js`:
+- [x] Extend `src/engine/responding.js`:
   - 2C opening: 2D waiting/negative, positive responses (suit or 2NT)
   - Weak two openings: raise (preemptive), 2NT feature ask, new suit forcing
 
@@ -163,7 +163,7 @@ This applies across all steps.
 
 ## Step 12: Competitive Bidding
 
-- [ ] `src/engine/competitive.js`:
+- [x] `src/engine/competitive.js`:
   - Overcalls (1-level and 2-level: suit quality + HCP)
   - Takeout doubles (shortness in opponent's suit, support for unbid suits, 12+ HCP)
   - Advancing partner's takeout double (minimum / invitational / game-forcing)
@@ -177,7 +177,7 @@ This applies across all steps.
 
 ## Step 13: Slam Conventions
 
-- [ ] `src/engine/conventions.js`:
+- [x] `src/engine/conventions.js`:
   - Blackwood (4NT: asks for aces; responses 5C/5D/5H/5S)
   - Gerber (4C over NT: asks for aces)
   - King-ask follow-ups (5NT after Blackwood)
@@ -185,3 +185,446 @@ This applies across all steps.
   - Slam decision logic (when to use Blackwood vs cue bids, when to stop at 5)
 
 **Files:** `src/engine/conventions.js`
+
+---
+
+## Step 14: Pool-Based Puzzle Selection
+
+Replace the current deal-then-check generator with a pool-and-select approach
+that biases toward tricky/rare scenarios (see `docs/puzzle-scenarios.md` for
+the full scenario catalog).
+
+**Design:** Option B -- each deal is tagged with *all* scenario IDs it supports,
+so a single deal can appear in multiple buckets and be presented in different
+auction framings.
+
+- [x] `src/puzzle/classify.js` -- Given a deal and its four evaluations, tag
+  the deal with every scenario ID it qualifies for (O-1 through X-3). Uses
+  the engine's existing recommendation functions to determine what each seat
+  would bid, then checks the scenario criteria from the catalog.
+- [x] `src/puzzle/pool.js` -- Pool manager:
+  - `buildPool(size)` -- deal `size` hands (default 10,000), evaluate all
+    four hands, run `classify()` on each, store deals in a Map keyed by
+    scenario ID (each deal may appear under multiple IDs)
+  - `selectDeal(scenarioId)` -- pick a random deal from the given bucket,
+    remove it from the pool (consumed)
+  - `refill(threshold)` -- if any bucket drops below `threshold` deals,
+    generate a fresh batch to top it up
+  - Pool is built lazily on first puzzle request; refills run during idle time
+- [x] `src/puzzle/weights.js` -- Balance-factor weighted selection:
+  - `balanceFactor` (0–1) controls the distribution of puzzle scenarios:
+    - **0** = natural distribution (scenarios appear at their real-world
+      frequency -- common situations dominate, rare ones almost never show)
+    - **1** = uniform distribution (every scenario is equally likely,
+      regardless of how rare it is in random deals)
+    - **0–1** = linear interpolation between the two:
+      `weight(s) = natural(s) * (1 - balanceFactor) + uniform * balanceFactor`
+      where `natural(s) = bucketSize(s) / totalClassifiedDeals` and
+      `uniform = 1 / scenarioCount`
+  - `naturalFrequencies` are measured from the pool after classification
+    (count of deals per bucket / total deals), so they reflect real
+    probabilities -- no manual tuning needed
+  - `pickScenario(pool, balanceFactor)` -- weighted random selection across
+    all scenario IDs that have deals available in the pool, using the
+    interpolated weights
+  - The balance factor could later be exposed as a user-facing slider
+    ("Training Intensity" or similar) in the UI
+- [x] Update `src/puzzle/generator.js` -- Replace `generatePuzzle()` to:
+  1. Call `pickScenario()` to choose a scenario
+  2. Call `selectDeal(scenarioId)` to get a qualifying deal from the pool
+  3. Build the partial auction for that deal + scenario (reuse existing
+     auction-building logic from the current `try*Deal()` functions)
+  4. Return the same `Puzzle` shape (`hands`, `auction`, `dealer`, `type`)
+  5. Trigger `refill()` in the background if pool is getting low
+
+**Files:** `src/puzzle/classify.js`, `src/puzzle/pool.js`, `src/puzzle/weights.js`, `src/puzzle/generator.js`
+
+---
+
+## Step 15: Responder's Rebid
+
+The current `rebid.js` only handles **opener's** rebid (after hearing a response).
+When the responder takes a second bid, the engine falls through to
+`scoreGenericRebid` which applies impossibly high HCP thresholds, effectively
+forcing a pass on every hand. This step adds the responder's-rebid decision
+tree — a standard SAYC stage.
+
+- [x] Add responder-rebid logic (in `src/engine/rebid.js` or a new file):
+  - **After opener rebids own suit** (e.g. 1♥ – 1♠ – 2♥):
+    - Pass with minimum (6-9) and no fit
+    - Preference (return to opener's first suit at cheapest level)
+    - Raise opener's rebid suit with 3+ support and invitational values (10-12)
+    - Bid 2NT invitational (10-12, balanced, stoppers)
+    - New suit (forcing, 10+)
+    - Jump to game with 13+
+  - **After opener raises responder's suit** (e.g. 1♥ – 1♠ – 2♠):
+    - Pass with minimum
+    - Bid 3 of the suit (invitational, 10-12)
+    - Bid 4 of a major (game, 13+)
+  - **After opener bids NT** (e.g. 1♥ – 1♠ – 1NT):
+    - Pass, invite with 2NT, bid game with 3NT
+    - New suit (non-forcing with minimum, forcing with invitational+)
+  - **After opener shows a new suit** (e.g. 1♦ – 1♠ – 2♣):
+    - Preference back to opener's first suit
+    - Raise new suit, bid NT, or introduce own suit
+    - Fourth-suit forcing (artificial, game-forcing)
+  - **After opener reverses** (e.g. 1♦ – 1♠ – 2♥):
+    - Opener showed 17+, so all bids below game are forcing
+    - Cheapest rebid = waiting/minimum
+- [x] Update `scoreRebid` dispatcher in `rebid.js` to detect when the player
+  is the responder (not the opener) and route to the new logic
+- [x] Handle the case where responder's first bid was competitive (overcall,
+  free bid, advance of partner's double) — adjust thresholds for the
+  information already conveyed by bidding freely at a higher level
+
+**Files:** `src/engine/rebid.js` (or new `src/engine/responder-rebid.js`), `src/engine/context.js`
+
+---
+
+## Step 16: Competitive Reentry
+
+When a partnership has established a direction (both partners have bid) and
+opponents then outbid them, neither partner currently has logic to compete
+further — the rebid module's `scoreGenericRebid` fallback makes any new bid
+nearly impossible. This step adds the "fight for the contract" decision layer.
+
+- [x] Add competitive-reentry logic (new `src/engine/contest.js` or extend
+  `competitive.js`):
+  - **Law of Total Tricks**: with an N-card fit, compete to the N-trick level
+    (e.g. 9-card heart fit → safe to bid 3♥; 10-card → 4♥)
+  - **Combined strength estimation**: use partner's known range (from their
+    bid) plus own hand to estimate combined points and decide game/partscore
+  - **"Don't sell out" principle**: with game-level values and a known fit,
+    don't let opponents steal the contract
+  - **Penalty double option**: when short in own fit but holding trump tricks
+    in opponents' suit, double for penalty instead of bidding on
+  - **"5-level belongs to the opponents"**: be cautious about bidding at the
+    5-level to compete — prefer doubling
+  - **Reopening doubles**: when opponents bid over partner, a double shows
+    extra values and invites partner to decide (bid on or convert to penalty)
+- [x] Update routing in `advisor.js`: in the `'rebid'` phase, detect when
+  opponents have bid *above* the partnership's last contract bid and route
+  to the contest module (either instead of, or merged with, standard rebid)
+- [x] Add context helpers as needed (e.g. `findPartnershipFit`,
+  `estimatePartnerRange`, `lastPartnershipBid`)
+
+**Files:** `src/engine/contest.js` (or extend `src/engine/competitive.js`), `src/engine/advisor.js`, `src/engine/context.js`
+
+---
+
+## Step 17: Third-Round / Continuation Bidding
+
+When either opener or responder has already bid twice (`ownBidCount >= 2`),
+the engine currently falls into `getContinuationBids` — a bare-bones scorer
+that gives Pass a perfect score of 10 and penalizes every continuation bid
+with generic HCP thresholds unrelated to the auction context. This causes
+the engine to pass forcing bids (e.g. partner's new suit at the 3-level)
+and stop well short of game or slam contracts the combined hands can support.
+
+This step replaces the placeholder `getContinuationBids` with a context-aware
+third-round decision module.
+
+- [x] **Detect forcing sequences**: when partner bids a new suit (especially
+  at the 3-level+), that bid is forcing — Pass must receive a heavy penalty
+  rather than a perfect score
+- [x] **Estimate combined strength**: after two rounds of bidding, both
+  partners have shown a range. Use partner's known range + own hand to
+  decide partscore / game / slam direction
+- [x] **Preference bids**: with support for partner's last suit, give
+  preference (return to that suit at the cheapest level). With extras, jump
+  or cue-bid
+- [x] **Game decisions**: with game-going values, bid game directly (3NT,
+  4M, 5m). With invitational values, make a game try. With minimum, sign off
+- [x] **Slam continuation**: when combined strength suggests slam, continue
+  slam exploration (Blackwood, cue bids) rather than stopping at game
+- [x] **Pass only when appropriate**: Pass should only score well when the
+  auction is at a reasonable resting place (partner's last bid was
+  non-forcing, combined strength is partscore level, or the partnership
+  has already reached game)
+- [x] Update routing in `advisor.js`: replace the `ownBidCount >= 2` →
+  `getContinuationBids` shortcut with the new context-aware module
+
+**Files:** `src/engine/rebid.js` (replace `getContinuationBids`), `src/engine/advisor.js`, `src/engine/context.js`
+
+---
+
+## Step 18: Competitive Bidding Refinements (from Auction Testing)
+
+Running full auctions via `run-game.mjs` surfaced two areas where the engine
+misbehaves in competitive / high-level situations. Both are in completed
+modules but need targeted fixes.
+
+### 18a: Overcall scoring must scale with bid level
+
+`scoreSuitOvercall` in `competitive.js` uses the same HCP range and suit
+length requirement for all non-1-level overcalls. A 4-level overcall with
+a 4-card suit gets only a 3-point penalty — nearly as good as a textbook
+2-level overcall. The engine will happily overcall at the 4- or 5-level
+on inadequate hands.
+
+- [x] Scale HCP requirements by level (e.g. 3-level needs 12+, 4-level
+  needs 14+ or a very long suit)
+- [x] Scale suit length requirements by level (e.g. 4-level overcall
+  should need 6+ or even 7+ cards, not just 5)
+- [x] Increase the length-short penalty multiplier at higher levels
+  (being 1 card short at the 4-level is far worse than at the 2-level)
+
+### 18b: Contest module must value penalty doubles over established game
+
+When the partnership has already reached game (e.g. 3NT) and opponents
+steal with a competitive bid, the contest module gives Pass a score of 7
+while Double gets only 4.5. The engine meekly passes instead of doubling
+opponents who just bid 4♥ on 14 combined HCP over our 3NT.
+
+- [x] Detect when the partnership had already reached game before the
+  opponent's competitive bid — this is a qualitatively different situation
+  from being outbid at the partscore level
+- [x] Increase `DONT_SELL_OUT_COST` or add a separate, heavier penalty
+  for passing when game was already established
+- [x] Boost penalty double scoring when the partnership has game-level
+  strength and opponents are at a low-level contract (they're likely going
+  down)
+- [x] Consider context: if we bid 3NT and they bid 4♥ on thin values,
+  double should be strongly preferred over pass or 5-level bids
+
+**Files:** `src/engine/competitive.js`, `src/engine/contest.js`
+
+### 18c: Additional fixes from auction testing
+
+- [x] Fix illegal double recommendations: candidate generators in
+  `contest.js` and `competitive.js` always included `dbl()` without
+  checking `isLegalBid`, causing illegal doubles after partner already
+  doubled
+- [x] Fix `scoreRR_afterNT` in `rebid.js`: missing `isGameLevel` guard
+  caused the engine to bid past 3NT (penalized pass for "not bidding
+  game" when game was already reached)
+- [x] Fix continuation-level overbids: `contScoreAboveGame`,
+  `contScoreFitBid`, `contScoreRebidOwn`, `contScoreNT`, and
+  `contScorePreference` applied fixed or no penalties for bids above
+  game, causing 7NT on 22 HCP. All now scale penalties with
+  `(level - gameLevel) * CONT_ABOVE_GAME_COST`
+
+**Files:** `src/engine/rebid.js`, `src/engine/contest.js`, `src/engine/competitive.js`
+
+---
+
+## Step 19: Underbid & Wrong-Side Auction Failures
+
+After fixing overbids (Step 18), running `node run-game.mjs 20` shows ~50%
+"Good" results. The remaining failures fall into two categories:
+
+### 19a: Underbids — stopping at partscore with game/slam values
+
+The engine frequently stops at the 2- or 3-level when combined strength
+justifies game or slam. Common patterns:
+
+- **1NT stays at 1NT** with 26+ combined pts (responder doesn't raise)
+- **Suit auction dies at 3-level** with 8+ card major fit and 26+ pts
+  (nobody bids 4M)
+- **Minor game missed** — combined 28+ pts but auction stops at 3♦/4♣
+  instead of reaching 5m or pivoting to 3NT
+
+Root causes:
+- `contEstimatePartnerRange` returns too wide or too low a range, so
+  `combinedMid` falls below the game threshold even when actual combined
+  strength is game-level
+- The continuation module's game-try logic is too conservative — it
+  requires near-certainty of game values before penalizing Pass
+- After competitive interference, the engine loses track of combined
+  strength and defaults to safe partscores
+
+Tasks:
+- [x] Audit `contEstimatePartnerRange` accuracy: run 50+ deals, compare
+  the estimated range to actual partner HCP, and tighten the estimates
+  where they're consistently too wide
+- [x] Strengthen game-try penalties in `contScorePass` — when combined
+  strength is invitational (23-25), Pass at the 2-level should be
+  penalized more than it currently is
+- [x] Add "we opened and partner responded" awareness — if both partners
+  have shown values, the combined floor is higher than the continuation
+  module currently assumes
+- [x] Ensure the continuation module's fit detection works after
+  competitive interference (opponent bids between partnership bids can
+  confuse the fit-finding logic)
+
+### 19b: Wrong-side results — weaker side wins the auction
+
+The side with fewer combined points ends up declaring. Common patterns:
+
+- **Weak side overcalls and the strong side stops competing** — the
+  continuation/contest module passes when it should push to game
+- **Competitive bidding steals the contract** — aggressive overcalls from
+  the weak side aren't doubled for penalty, and the strong side doesn't
+  re-enter
+- **One partner passes a forcing or invitational sequence** — the
+  continuation module's `contDetectForcing` misses some forcing contexts,
+  letting the bidder pass prematurely
+
+Tasks:
+- [x] Improve `contDetectForcing` — after opener bids a new suit at the
+  3-level, or responder introduces a new suit, the sequence is forcing;
+  currently some of these go undetected
+- [x] In the contest module, when opponents outbid at the 3- or 4-level
+  and the partnership has game-going values, bias toward doubling or
+  bidding game rather than passing
+- [x] When the continuation module estimates combined game values (25+)
+  and there's a known fit, increase the penalty for stopping below game
+  regardless of who opened
+- [x] Consider adding a "sanity check" layer: before finalizing a Pass,
+  if the partnership has exchanged positive bids (opening + response or
+  better), verify that the final contract level is consistent with the
+  minimum combined range
+
+**Files:** `src/engine/rebid.js` (`getContinuationBids`, `contEstimatePartnerRange`, `contDetectForcing`), `src/engine/contest.js`, `src/engine/context.js`
+
+---
+
+## Step 20: Wrong-Side Auction Failures (from 1000-Deal Audit)
+
+Running a 1000-deal audit (`run-audit.mjs`) shows ~17-18% of auctions result
+in the weaker side declaring — the partnership with fewer combined points wins
+the contract. Three root causes account for nearly all of these.
+
+### 20a: Cue bids in opponent's suit treated as natural
+
+When a player bids the opponents' suit (a cue bid showing strength, not a
+desire to play that suit), the engine's fit-detection and response logic
+treats it as a natural bid. Partner then passes (thinking the auction found a
+home), doubles for penalty, or gives preference to the "suit" — all wrong.
+
+**Example:** East opens 1♦, South overcalls 1♠, West makes a negative double,
+East bids 2♠ (cue bid, game-forcing). West sees "partner bid spades" and
+passes. EW play 2♠ instead of reaching 4♥ with their 9-card fit.
+
+The `resolvePartnerBid` function in `rebid.js` already handles this for the
+opener's rebid path, but it doesn't apply to:
+- The responding phase (when partner's latest bid is a cue bid)
+- The continuation module (`getContinuationBids`)
+- The post-double rebid path (`getPostDoubleBids`)
+- The contest module (`getContestBids`)
+
+Step 19 added opponent-suit filtering to `contFindFit`, `contPartnerSuits`,
+and `analyzeFit`, which prevents cue bids from being confused with real fits.
+But the partner-response side remains unfixed — the player facing a cue bid
+doesn't know to treat it as forcing.
+
+Tasks:
+- [ ] When partner bids a strain that matches a known opponent strain, detect
+  it as a cue bid in the `classifyAuction` / advisor routing layer. This bid
+  is always forcing — the responder must not pass
+- [ ] In `getPostDoubleBids`: check partner's *latest* bid (not just their
+  first bid via `findPartnerBid`). If partner made a second bid that's a
+  cue bid, the doubler must rebid — penalize pass heavily
+- [ ] In `getContinuationBids` / `contDetectForcing`: if partner's last bid
+  is in the opponents' suit, mark the sequence as forcing (cue bids always
+  demand a response)
+- [ ] In `getCompetitiveResponseBids`: when partner opened and then cue-bid
+  the opponents' suit on their rebid, treat this as a game force — responder
+  should not pass below game
+
+### 20b: "No recommendations" defaults to Pass for the strong side
+
+The engine produces zero recommendations 30-60 times per 1000 deals
+(0 returned from `getRecommendations`). The simulator defaults to Pass, which
+is catastrophic when the strong side is the one with no recommendations.
+
+Common situations where this happens:
+- **Responding to 2NT opening**: the engine has no response logic for 2NT
+  openings (only 1NT and 2♣ are handled). Responder always passes 2NT
+- **Responding to partner's preempt at the 4-level+**: the engine handles
+  responses to weak twos and 3-level preempts but not higher
+- **Unusual auction shapes**: when the auction reaches a state that no module
+  recognizes, all modules return empty arrays
+
+Tasks:
+- [ ] Add basic response logic for 2NT openings in `responding.js`:
+  Stayman (3♣), Jacoby transfers (3♦→♥, 3♥→♠), raise to 3NT (4-10 HCP),
+  raise to 4NT/6NT with slam values, Pass with 0-3 HCP
+- [ ] Add basic response logic for partner's 3-level preempt: raise with
+  support and an outside ace, bid 3NT with stoppers and 16+, pass otherwise
+- [ ] Add a safety-net fallback in `getRecommendations`: when the phase-based
+  module returns an empty array, generate a minimal set of reasonable bids
+  (pass, cheapest bid in longest suit, cheapest NT) scored conservatively,
+  rather than returning nothing
+
+### 20c: Strong side stops competing after opponent interference
+
+When the weaker side makes aggressive competitive bids (overcalls, raises,
+preemptive jumps), the stronger side often stops competing too early. The
+engine's post-interference logic doesn't push hard enough when the hand's own
+strength is well above average.
+
+**Example:** NS has 33 combined pts. South has 22 HCP and 7 diamonds. After
+North opens 1♣ and opponents compete to 4♣, North doubles for penalty. South
+(22 HCP, 7 diamonds) passes the penalty double instead of pulling to 5♦ — the
+engine doesn't recognize that sitting a penalty double with a huge one-suited
+hand is wrong.
+
+**Example:** EW has 29 pts with a 9-card heart fit. West doubles South's
+1NT for penalty. East (4 HCP) passes the penalty double, then when South
+escapes to 2♣ and West doubles again, East still doesn't bid. EW never find
+their heart fit.
+
+Tasks:
+- [ ] In `scoreContestPass` (contest.js): when own HCP is 17+ and the
+  partnership has a known fit, apply a much stronger "don't sell out" penalty
+  — a hand this strong should almost never allow opponents to play undoubled
+- [ ] In `scorePostDblPass` (competitive.js): when the doubler has a long
+  suit (6+) that hasn't been bid by anyone, penalize pass to encourage pulling
+  the penalty double to their own suit. A penalty double with a running
+  7-card suit is a misbid — the hand should declare, not defend
+- [ ] In `scoreAdvDblPass` (competitive.js): when partner made a *penalty*
+  double (not takeout) and the opponent has escaped to a new suit, advancer
+  should consider bidding with any suit length ≥5 instead of sitting —
+  partner's penalty double was of the original contract, not this new one
+- [ ] In `scoreAdvancePenaltyDblCandidates`: after partner's penalty double
+  of 1NT and opponent escapes to a suit, consider doubling the escape suit
+  with 4+ cards and 8+ HCP, or bidding a 5+ card suit with 8+ HCP, rather
+  than always passing
+
+**Files:** `src/engine/competitive.js`, `src/engine/contest.js`, `src/engine/rebid.js`, `src/engine/responding.js`, `src/engine/advisor.js`
+
+---
+
+## Audit: Investigate 0-Blocked-Bid Interference Deals
+
+The audit's counterfactual interference analysis reveals ~26/1000 deals tagged
+INTERFERENCE where the stronger side had **0 blocked bids** — meaning the
+engine would have made the exact same bids even without the opponents'
+interference, yet the result was still wrong. These are real engine bugs
+masquerading as competitive-bidding problems.
+
+Tasks:
+- [x] Add a flag to `run-audit.mjs` (e.g. `--show-unblocked`) that prints
+  the full `formatAuditReport` for INTERFERENCE deals with 0 blocked bids
+  instead of the normal problem deals — these are the most actionable
+- [x] Review the sample deals to categorize the common failure patterns
+- [x] Fix the identified patterns in the bidding engine
+
+### Identified failure patterns and fixes
+
+**A. Cue-bid not recognized after takeout double** (Deals 4, 13, 20, 26)
+After partner makes a takeout double and advancer cue-bids the opponent's
+suit (showing strength), the doubler's rebid path failed to recognize the
+cue-bid because `partnerCueBid` detection required `partnerLast` to differ
+from `partnerBid` — which is never true when the cue-bid is partner's first
+and only bid. **Fix:** Simplified `partnerCueBid` in `competitive.js` to
+detect any bid in an opponent's suit, regardless of bid history.
+
+**B. Strong hand (17+ HCP) sells out in continuation** (Deals 3, 14)
+When the continuation module estimated combined strength, hands with 17+
+HCP would pass at low levels because partner hadn't made a contract bid
+(only responded or advanced), making `combinedMid` fall below game
+thresholds. **Fix:** Added an explicit penalty in `contScorePass`
+(`rebid.js`) for passing with 17+ HCP at the 3-level or below, scaling
+with HCP above 16.
+
+**C. Post-double pass with long suit doesn't pull** (Deals 8, 17)
+After making a takeout double, a hand with a 6+ card unbid suit would pass
+partner's response instead of pulling to their own suit. The penalty for
+having a long suit was only `(len-5)*3` = 3 for a 6-card suit. **Fix:**
+Increased base penalty to `(len-5)*4` and added an extra penalty (+3) when
+the doubler has 0-1 cards in partner's suit (poor fit), encouraging the
+pull to the long suit.
+
+**Files:** `run-audit.mjs`, `src/engine/audit.js`, `src/engine/competitive.js`, `src/engine/rebid.js`

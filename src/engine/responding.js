@@ -42,6 +42,11 @@ const RESP_2NT_MIN = 13;
 const RESP_2NT_MAX = 15;
 const JUMP_SHIFT_MIN = 19;
 const JUMP_SHIFT_MIN_LEN = 5;
+const GAME_RAISE_MIN_HCP = 5;
+const GAME_RAISE_MAX_HCP = 10;
+const GAME_RAISE_MIN_SUPPORT = 5;
+const GAME_RAISE_BALANCED_COST = 3;
+const GAME_RAISE_SEMI_BAL_COST = 1.5;
 const LONG_SUIT_THRESHOLD = 6;
 const RESP_LONG_SUIT_DISCOUNT = 2;
 
@@ -64,6 +69,33 @@ const LONG_MAJOR_PASS_COST = 2;
 const MAJOR_AVAIL_NT_COST = 2;
 const FIVE_MAJOR_NT_COST = 3;
 const TRANSFER_SUIT_PREF_COST = 1.5;
+
+// ── 2♣ Response thresholds ───────────────────────────────────────────
+
+const RESP_2C_NEG_MAX = 7;
+const RESP_2C_POS_MIN = 8;
+const RESP_2C_POS_SUIT_LEN = 5;
+const RESP_2C_PASS_COST = 20;
+const RESP_2C_POS_AVAIL_COST = 1;
+const RESP_2C_5CARD_NT_COST = 3;
+
+// ── Weak Two Response thresholds ─────────────────────────────────────
+
+const WT_PASS_MAX = 13;
+const WT_RAISE_SUPPORT = 3;
+const WT_RAISE_MAX_HCP = 13;
+const WT_GAME_SUPPORT = 3;
+const WT_GAME_MIN_HCP = 14;
+const WT_GAME_PREEMPT_SUPPORT = 5;
+const WT_GAME_PREEMPT_MIN_HCP = 8;
+const WT_2NT_MIN = 14;
+const WT_2NT_MAX = 16;
+const WT_NEW_SUIT_MIN = 16;
+const WT_NEW_SUIT_LEN = 5;
+const WT_3NT_MIN = 15;
+const WT_3NT_MAX = 17;
+const WT_SUPPORT_PASS_COST = 2;
+const WT_LONG_SUPPORT_2NT_COST = 2;
 
 // ── Display ──────────────────────────────────────────────────────────
 
@@ -90,6 +122,18 @@ const STRAIN_DISPLAY = {
  * @returns {BidRecommendation[]}
  */
 export function getRespondingBids(_hand, evaluation, partnerBid) {
+  if (partnerBid.level === 2 && partnerBid.strain === Strain.CLUBS) {
+    return get2CResponseBids(evaluation);
+  }
+  if (partnerBid.level === 2 && partnerBid.strain === Strain.NOTRUMP) {
+    return get2NTResponseBids(evaluation);
+  }
+  if (partnerBid.level === 2 && partnerBid.strain !== Strain.NOTRUMP) {
+    return getWeakTwoResponseBids(evaluation, partnerBid.strain);
+  }
+  if (partnerBid.level >= 3 && partnerBid.strain !== Strain.NOTRUMP) {
+    return getPreempt3ResponseBids(evaluation, partnerBid);
+  }
   if (partnerBid.level !== 1) return [];
   if (partnerBid.strain === Strain.NOTRUMP) return get1NTResponseBids(evaluation);
 
@@ -138,6 +182,10 @@ function scoreResponseBid(bid, eval_, ps) {
   if (level === 2 && ranksAbove(strain, ps)) return scoreJumpShift(bid, eval_);
   if (level === 2) return scoreNewSuit2(bid, eval_, ps);
   if (level === 3 && strain === ps) return scoreLimitRaise(bid, eval_, ps);
+  if (level === 3 && strain !== Strain.NOTRUMP && strain !== ps && !ranksAbove(strain, ps)) {
+    return scoreJumpShift(bid, eval_);
+  }
+  if (level === 4 && strain === ps && isMajor(ps)) return scoreGameRaise(bid, eval_, ps);
   return scoreGenericResponse(bid, eval_, ps);
 }
 
@@ -367,7 +415,7 @@ function resp2NTExpl(hcp, shapeClass, shape, ps) {
  */
 function scoreJumpShift(bid, eval_) {
   const { hcp, shape } = eval_;
-  const strain = /** @type {import('../model/bid.js').ContractBid} */ (bid).strain;
+  const { level, strain } = /** @type {import('../model/bid.js').ContractBid} */ (bid);
   const len = suitLen(shape, strain);
   const name = STRAIN_DISPLAY[strain];
 
@@ -376,16 +424,51 @@ function scoreJumpShift(bid, eval_) {
   pen(p, `${hcp} HCP, need ${JUMP_SHIFT_MIN}+`, Math.max(0, JUMP_SHIFT_MIN - hcp) * HCP_COST);
   pen(p, `${len} ${name}, need ${JUMP_SHIFT_MIN_LEN}+`, Math.max(0, JUMP_SHIFT_MIN_LEN - len) * LENGTH_SHORT_COST);
 
-  return scored(bid, deduct(penTotal(p)), jumpShiftExpl(hcp, len, strain), p);
+  return scored(bid, deduct(penTotal(p)), jumpShiftExpl(hcp, len, level, strain), p);
 }
 
-/** @param {number} hcp @param {number} len @param {import('../model/bid.js').Strain} strain */
-function jumpShiftExpl(hcp, len, strain) {
+/** @param {number} hcp @param {number} len @param {number} level @param {import('../model/bid.js').Strain} strain */
+function jumpShiftExpl(hcp, len, level, strain) {
   const sym = STRAIN_SYMBOLS[strain];
   const name = STRAIN_DISPLAY[strain];
   if (hcp < JUMP_SHIFT_MIN) return `${hcp} HCP: need ${JUMP_SHIFT_MIN}+ for jump shift`;
   if (len < JUMP_SHIFT_MIN_LEN) return `${len} ${name}: need ${JUMP_SHIFT_MIN_LEN}+ for jump shift`;
-  return `${hcp} HCP with ${len} ${name}: jump shift to 2${sym}`;
+  return `${hcp} HCP with ${len} ${name}: jump shift to ${level}${sym}`;
+}
+
+// ── Game raise (4♥/4♠ — preemptive, 5-10 HCP, 5+ support, shape) ────
+
+/**
+ * @param {import('../model/bid.js').Bid} bid
+ * @param {Evaluation} eval_
+ * @param {import('../model/bid.js').Strain} ps
+ */
+function scoreGameRaise(bid, eval_, ps) {
+  const { hcp, shape, shapeClass } = eval_;
+  const support = suitLen(shape, ps);
+  const name = STRAIN_DISPLAY[ps];
+
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${hcp} HCP, need ${GAME_RAISE_MIN_HCP}-${GAME_RAISE_MAX_HCP}`,
+    hcpDev(hcp, GAME_RAISE_MIN_HCP, GAME_RAISE_MAX_HCP) * HCP_COST);
+  pen(p, `${support} ${name}, need ${GAME_RAISE_MIN_SUPPORT}+`,
+    Math.max(0, GAME_RAISE_MIN_SUPPORT - support) * LENGTH_SHORT_COST);
+  if (shapeClass === 'balanced') pen(p, 'Balanced: prefer constructive bidding', GAME_RAISE_BALANCED_COST);
+  else if (shapeClass === 'semi-balanced') pen(p, 'Semi-balanced: less ideal for preempt', GAME_RAISE_SEMI_BAL_COST);
+
+  return scored(bid, deduct(penTotal(p)), gameRaiseExpl(hcp, support, shapeClass, ps), p);
+}
+
+/** @param {number} hcp @param {number} support @param {import('./evaluate.js').ShapeClass} shapeClass @param {import('../model/bid.js').Strain} ps */
+function gameRaiseExpl(hcp, support, shapeClass, ps) {
+  const sym = STRAIN_SYMBOLS[ps];
+  const name = STRAIN_DISPLAY[ps];
+  if (support < GAME_RAISE_MIN_SUPPORT) return `${support} ${name}: need ${GAME_RAISE_MIN_SUPPORT}+ for preemptive 4${sym}`;
+  if (hcp > GAME_RAISE_MAX_HCP) return `${hcp} HCP: too strong for preemptive 4${sym} (use Jacoby 2NT or splinter)`;
+  if (hcp < GAME_RAISE_MIN_HCP) return `${hcp} HCP: too weak for 4${sym} (${GAME_RAISE_MIN_HCP}+)`;
+  if (shapeClass === 'balanced') return `Balanced hand: prefer constructive bidding over preemptive 4${sym}`;
+  return `${hcp} HCP with ${support} ${name}: preemptive raise to 4${sym}`;
 }
 
 // ── Generic response (levels 3+ not otherwise handled) ───────────────
@@ -679,6 +762,764 @@ function genericNTRespExpl(hcp, level, strain, minHcp) {
   return `${hcp} HCP: non-standard ${level}${sym} over 1NT`;
 }
 
+// ── Responses to 2NT opening (20-21 HCP, balanced) ──────────────────
+
+const NT2_RESP_PASS_MAX = 3;
+const NT2_STAYMAN_MIN_HCP = 4;
+const NT2_TRANSFER_MIN_LEN = 5;
+const NT2_GAME_MIN_HCP = 4;
+const NT2_GAME_MAX_HCP = 10;
+const NT2_SLAM_MIN_HCP = 11;
+const NT2_SLAM_MAX_HCP = 14;
+const NT2_GRAND_MIN_HCP = 15;
+
+/**
+ * Score every plausible response when partner opened 2NT.
+ * @param {Evaluation} eval_
+ * @returns {BidRecommendation[]}
+ */
+function get2NTResponseBids(eval_) {
+  /** @type {import('../model/bid.js').Bid[]} */
+  const bids = [pass()];
+  for (let level = 3; level <= 7; level++) {
+    for (const strain of STRAIN_ORDER) {
+      bids.push(contractBid(level, strain));
+    }
+  }
+  /** @type {BidRecommendation[]} */
+  const results = [];
+  for (const bid of bids) {
+    results.push(score2NTResponse(bid, eval_));
+  }
+  return results.sort((a, b) => b.priority - a.priority);
+}
+
+/**
+ * @param {import('../model/bid.js').Bid} bid
+ * @param {Evaluation} eval_
+ * @returns {BidRecommendation}
+ */
+function score2NTResponse(bid, eval_) {
+  if (bid.type === 'pass') return score2NTPass(bid, eval_);
+  if (bid.type !== 'contract') return scored(bid, 0, '');
+  const { level, strain } = bid;
+  if (level === 3 && strain === Strain.CLUBS) return score2NTStayman(bid, eval_);
+  if (level === 3 && strain === Strain.DIAMONDS) return score2NTTransfer(bid, eval_, Strain.HEARTS);
+  if (level === 3 && strain === Strain.HEARTS) return score2NTTransfer(bid, eval_, Strain.SPADES);
+  if (level === 3 && strain === Strain.NOTRUMP) return score2NT3NT(bid, eval_);
+  if (level === 4 && strain === Strain.NOTRUMP) return score2NT4NT(bid, eval_);
+  if (level === 6 && strain === Strain.NOTRUMP) return score2NT6NT(bid, eval_);
+  return score2NTGeneric(bid, eval_);
+}
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ */
+function score2NTPass(bid, eval_) {
+  const { hcp, shape } = eval_;
+  const longMajor = Math.max(suitLen(shape, Strain.HEARTS), suitLen(shape, Strain.SPADES));
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  if (hcp > NT2_RESP_PASS_MAX) {
+    pen(p, `${hcp} HCP: too strong to pass 2NT (${NT2_RESP_PASS_MAX} max)`,
+      (hcp - NT2_RESP_PASS_MAX) * HCP_COST);
+  }
+  if (longMajor >= NT2_TRANSFER_MIN_LEN && hcp >= NT2_STAYMAN_MIN_HCP) {
+    pen(p, `${longMajor}-card major: transfer available`, LONG_MAJOR_PASS_COST);
+  }
+  const expl = hcp > NT2_RESP_PASS_MAX
+    ? `${hcp} HCP: too strong to pass 2NT`
+    : `${hcp} HCP: pass partner's 2NT`;
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ */
+function score2NTStayman(bid, eval_) {
+  const { hcp, shape } = eval_;
+  const spades = suitLen(shape, Strain.SPADES);
+  const hearts = suitLen(shape, Strain.HEARTS);
+  const longestMajor = Math.max(spades, hearts);
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${hcp} HCP, need ${NT2_STAYMAN_MIN_HCP}+`,
+    Math.max(0, NT2_STAYMAN_MIN_HCP - hcp) * HCP_COST);
+  if (longestMajor < STAYMAN_MAJOR_LEN) {
+    pen(p, 'No 4-card major for Stayman', NO_MAJOR_STAYMAN_COST);
+  }
+  if (spades >= NT2_TRANSFER_MIN_LEN && hearts < STAYMAN_MAJOR_LEN) {
+    pen(p, '5+ spades: prefer transfer', PREFER_TRANSFER_COST);
+  }
+  if (hearts >= NT2_TRANSFER_MIN_LEN && spades < STAYMAN_MAJOR_LEN) {
+    pen(p, '5+ hearts: prefer transfer', PREFER_TRANSFER_COST);
+  }
+  const expl = longestMajor >= STAYMAN_MAJOR_LEN && hcp >= NT2_STAYMAN_MIN_HCP
+    ? `${hcp} HCP with 4-card major: Stayman 3${STRAIN_SYMBOLS[Strain.CLUBS]} over 2NT`
+    : longestMajor < STAYMAN_MAJOR_LEN
+      ? 'No 4-card major for Stayman'
+      : `${hcp} HCP: need ${NT2_STAYMAN_MIN_HCP}+ for Stayman`;
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+/**
+ * @param {import('../model/bid.js').Bid} bid
+ * @param {Evaluation} eval_
+ * @param {import('../model/bid.js').Strain} targetStrain
+ */
+function score2NTTransfer(bid, eval_, targetStrain) {
+  const { shape } = eval_;
+  const len = suitLen(shape, targetStrain);
+  const name = STRAIN_DISPLAY[targetStrain];
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  if (len < NT2_TRANSFER_MIN_LEN) {
+    pen(p, `${len} ${name}, need ${NT2_TRANSFER_MIN_LEN}+`,
+      (NT2_TRANSFER_MIN_LEN - len) * LENGTH_SHORT_COST);
+  }
+  const otherMajor = targetStrain === Strain.HEARTS ? Strain.SPADES : Strain.HEARTS;
+  const otherLen = suitLen(shape, otherMajor);
+  if (otherLen > len) {
+    pen(p, `Other major is longer (${otherLen} vs ${len})`,
+      (otherLen - len) * TRANSFER_SUIT_PREF_COST);
+  }
+  const expl = len >= NT2_TRANSFER_MIN_LEN
+    ? `${len} ${name}: Jacoby Transfer over 2NT`
+    : `${len} ${name}: need ${NT2_TRANSFER_MIN_LEN}+ for transfer`;
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ */
+function score2NT3NT(bid, eval_) {
+  const { hcp, shape } = eval_;
+  const longMajor = Math.max(suitLen(shape, Strain.SPADES), suitLen(shape, Strain.HEARTS));
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${hcp} HCP, need ${NT2_GAME_MIN_HCP}-${NT2_GAME_MAX_HCP}`,
+    hcpDev(hcp, NT2_GAME_MIN_HCP, NT2_GAME_MAX_HCP) * HCP_COST);
+  if (longMajor >= STAYMAN_MAJOR_LEN && hcp >= NT2_STAYMAN_MIN_HCP) {
+    pen(p, '4-card major: prefer Stayman', MAJOR_AVAIL_NT_COST);
+  }
+  if (longMajor >= NT2_TRANSFER_MIN_LEN) {
+    pen(p, '5-card major: prefer transfer', FIVE_MAJOR_NT_COST);
+  }
+  const expl = hcpDev(hcp, NT2_GAME_MIN_HCP, NT2_GAME_MAX_HCP) === 0
+    ? `${hcp} HCP: raise to 3NT`
+    : `${hcp} HCP: outside 3NT range (${NT2_GAME_MIN_HCP}-${NT2_GAME_MAX_HCP})`;
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ */
+function score2NT4NT(bid, eval_) {
+  const { hcp, shapeClass } = eval_;
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${hcp} HCP, need ${NT2_SLAM_MIN_HCP}-${NT2_SLAM_MAX_HCP}`,
+    hcpDev(hcp, NT2_SLAM_MIN_HCP, NT2_SLAM_MAX_HCP) * HCP_COST);
+  pen(p, `${shapeClass} (need balanced)`, shapePenalty(shapeClass));
+  const expl = hcpDev(hcp, NT2_SLAM_MIN_HCP, NT2_SLAM_MAX_HCP) === 0
+    ? `${hcp} HCP: 4NT quantitative slam invitation`
+    : `${hcp} HCP: outside quantitative range`;
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ */
+function score2NT6NT(bid, eval_) {
+  const { hcp, shapeClass } = eval_;
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${hcp} HCP, need ${NT2_GRAND_MIN_HCP}+`,
+    Math.max(0, NT2_GRAND_MIN_HCP - hcp) * HCP_COST);
+  pen(p, `${shapeClass} (need balanced)`, shapePenalty(shapeClass));
+  const expl = hcp >= NT2_GRAND_MIN_HCP
+    ? `${hcp} HCP: 6NT slam`
+    : `${hcp} HCP: need ${NT2_GRAND_MIN_HCP}+ for slam`;
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+/**
+ * @param {import('../model/bid.js').Bid} bid
+ * @param {Evaluation} eval_
+ * @returns {BidRecommendation}
+ */
+function score2NTGeneric(bid, eval_) {
+  const { hcp, shape, shapeClass } = eval_;
+  const { level, strain } = /** @type {ContractBid} */ (bid);
+  const minHcp = NT2_STAYMAN_MIN_HCP + Math.max(0, level - 3) * 4;
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${hcp} HCP, need ${minHcp}+`, Math.max(0, minHcp - hcp) * HCP_COST);
+  if (strain === Strain.NOTRUMP) {
+    pen(p, `${shapeClass} (need balanced)`, shapePenalty(shapeClass));
+  } else {
+    const len = suitLen(shape, strain);
+    pen(p, `${len} ${STRAIN_DISPLAY[strain]}, need 5+`,
+      Math.max(0, 5 - len) * LENGTH_SHORT_COST);
+  }
+  const sym = strain === Strain.NOTRUMP ? 'NT' : STRAIN_SYMBOLS[strain];
+  const expl = hcp < minHcp
+    ? `${hcp} HCP: ${level}${sym} over 2NT needs ${minHcp}+ HCP`
+    : `${hcp} HCP: non-standard ${level}${sym} over 2NT`;
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+// ── Responses to 3-level preempts ────────────────────────────────────
+
+const PRE3_PASS_MAX = 14;
+const PRE3_RAISE_SUPPORT = 3;
+const PRE3_RAISE_ACE_REQ = true;
+const PRE3_3NT_MIN = 16;
+const PRE3_3NT_MAX = 20;
+const PRE3_GAME_SUPPORT = 3;
+const PRE3_GAME_MIN = 14;
+
+/**
+ * Score every plausible response when partner opened at the 3-level (preempt).
+ * @param {Evaluation} eval_
+ * @param {ContractBid} partnerBid
+ * @returns {BidRecommendation[]}
+ */
+function getPreempt3ResponseBids(eval_, partnerBid) {
+  const ps = partnerBid.strain;
+  /** @type {import('../model/bid.js').Bid[]} */
+  const bids = [pass()];
+  for (let level = partnerBid.level; level <= 7; level++) {
+    for (const strain of STRAIN_ORDER) {
+      const bid = contractBid(level, strain);
+      if (level > partnerBid.level ||
+          STRAIN_ORDER.indexOf(strain) > STRAIN_ORDER.indexOf(ps)) {
+        bids.push(bid);
+      }
+    }
+  }
+  /** @type {BidRecommendation[]} */
+  const results = [];
+  for (const bid of bids) {
+    results.push(scorePre3Response(bid, eval_, partnerBid));
+  }
+  return results.sort((a, b) => b.priority - a.priority);
+}
+
+/**
+ * @param {import('../model/bid.js').Bid} bid
+ * @param {Evaluation} eval_
+ * @param {ContractBid} partnerBid
+ * @returns {BidRecommendation}
+ */
+function scorePre3Response(bid, eval_, partnerBid) {
+  if (bid.type === 'pass') return scorePre3Pass(bid, eval_, partnerBid);
+  if (bid.type !== 'contract') return scored(bid, 0, '');
+  const { level, strain } = bid;
+  const ps = partnerBid.strain;
+  if (strain === Strain.NOTRUMP && level === 3) return scorePre3NT(bid, eval_);
+  if (strain === ps && level === partnerBid.level + 1) return scorePre3Raise(bid, eval_, ps);
+  if (strain === ps && isMajor(ps) && level === 4) return scorePre3GameRaise(bid, eval_, ps);
+  if (strain === ps && !isMajor(ps) && level === 5) return scorePre3GameRaise(bid, eval_, ps);
+  return scorePre3Generic(bid, eval_, partnerBid);
+}
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ @param {ContractBid} partnerBid */
+function scorePre3Pass(bid, eval_, partnerBid) {
+  const { hcp, shape } = eval_;
+  const support = suitLen(shape, partnerBid.strain);
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  if (hcp > PRE3_PASS_MAX) {
+    pen(p, `${hcp} HCP: game interest`, (hcp - PRE3_PASS_MAX) * HCP_COST);
+  }
+  if (support >= PRE3_RAISE_SUPPORT && hcp >= 10) {
+    pen(p, `${support} ${STRAIN_DISPLAY[partnerBid.strain]} support: consider raising`, 2);
+  }
+  const expl = hcp > PRE3_PASS_MAX
+    ? `${hcp} HCP: too strong to pass partner's preempt`
+    : `${hcp} HCP: pass partner's preempt`;
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ */
+function scorePre3NT(bid, eval_) {
+  const { hcp, shapeClass } = eval_;
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${hcp} HCP, need ${PRE3_3NT_MIN}-${PRE3_3NT_MAX}`,
+    hcpDev(hcp, PRE3_3NT_MIN, PRE3_3NT_MAX) * HCP_COST);
+  pen(p, `${shapeClass} (prefer balanced)`, shapePenalty(shapeClass));
+  const expl = hcpDev(hcp, PRE3_3NT_MIN, PRE3_3NT_MAX) === 0 && shapeClass === 'balanced'
+    ? `${hcp} HCP, balanced: 3NT`
+    : shapeClass !== 'balanced'
+      ? 'Not balanced for 3NT'
+      : `${hcp} HCP: outside 3NT range`;
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} ps */
+function scorePre3Raise(bid, eval_, ps) {
+  const { hcp, shape } = eval_;
+  const { level } = /** @type {ContractBid} */ (bid);
+  const support = suitLen(shape, ps);
+  const name = STRAIN_DISPLAY[ps];
+  const sym = STRAIN_SYMBOLS[ps];
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${support} ${name}, need ${PRE3_RAISE_SUPPORT}+`,
+    Math.max(0, PRE3_RAISE_SUPPORT - support) * LENGTH_SHORT_COST);
+  if (hcp > 13) {
+    pen(p, `${hcp} HCP: too strong for preemptive raise, consider game`,
+      (hcp - 13) * HCP_COST);
+  }
+  const expl = support >= PRE3_RAISE_SUPPORT
+    ? `${support} ${name}: preemptive raise to ${level}${sym}`
+    : `${support} ${name}: need ${PRE3_RAISE_SUPPORT}+ to raise`;
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} ps */
+function scorePre3GameRaise(bid, eval_, ps) {
+  const { hcp, shape } = eval_;
+  const { level } = /** @type {ContractBid} */ (bid);
+  const support = suitLen(shape, ps);
+  const name = STRAIN_DISPLAY[ps];
+  const sym = STRAIN_SYMBOLS[ps];
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${support} ${name}, need ${PRE3_GAME_SUPPORT}+`,
+    Math.max(0, PRE3_GAME_SUPPORT - support) * LENGTH_SHORT_COST);
+  pen(p, `${hcp} HCP, need ${PRE3_GAME_MIN}+`,
+    Math.max(0, PRE3_GAME_MIN - hcp) * HCP_COST);
+  const expl = support >= PRE3_GAME_SUPPORT && hcp >= PRE3_GAME_MIN
+    ? `${hcp} HCP, ${support} ${name}: game raise to ${level}${sym}`
+    : `Need ${PRE3_GAME_MIN}+ HCP and ${PRE3_GAME_SUPPORT}+ support for game`;
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+/**
+ * @param {import('../model/bid.js').Bid} bid
+ * @param {Evaluation} eval_
+ * @param {ContractBid} partnerBid
+ * @returns {BidRecommendation}
+ */
+function scorePre3Generic(bid, eval_, partnerBid) {
+  const { hcp, shape, shapeClass } = eval_;
+  const { level, strain } = /** @type {ContractBid} */ (bid);
+  const minHcp = PRE3_GAME_MIN + Math.max(0, level - 4) * 4;
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${hcp} HCP, need ${minHcp}+`, Math.max(0, minHcp - hcp) * HCP_COST);
+  if (strain === Strain.NOTRUMP) {
+    pen(p, `${shapeClass} (need balanced)`, shapePenalty(shapeClass));
+  } else if (strain !== partnerBid.strain) {
+    const len = suitLen(shape, strain);
+    pen(p, `${len} ${STRAIN_DISPLAY[strain]}, need 5+`,
+      Math.max(0, 5 - len) * LENGTH_SHORT_COST);
+  }
+  const sym = strain === Strain.NOTRUMP ? 'NT' : STRAIN_SYMBOLS[strain];
+  const expl = hcp < minHcp
+    ? `${hcp} HCP: ${level}${sym} needs ${minHcp}+ HCP`
+    : `${hcp} HCP: ${level}${sym} over preempt`;
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+// ── Responses to 2♣ (strong, artificial, forcing) ────────────────────
+
+/**
+ * Score every plausible response when partner opened 2♣ (strong, artificial).
+ * @param {Evaluation} eval_
+ * @returns {BidRecommendation[]}
+ */
+function get2CResponseBids(eval_) {
+  const candidates = response2CCandidates();
+  /** @type {BidRecommendation[]} */
+  const results = [];
+  for (const bid of candidates) {
+    results.push(score2CResponse(bid, eval_));
+  }
+  return results.sort((a, b) => b.priority - a.priority);
+}
+
+function response2CCandidates() {
+  /** @type {import('../model/bid.js').Bid[]} */
+  const bids = [pass()];
+  for (let level = 2; level <= 7; level++) {
+    for (const strain of STRAIN_ORDER) {
+      if (level === 2 && strain === Strain.CLUBS) continue;
+      bids.push(contractBid(level, strain));
+    }
+  }
+  return bids;
+}
+
+/**
+ * @param {import('../model/bid.js').Bid} bid
+ * @param {Evaluation} eval_
+ * @returns {BidRecommendation}
+ */
+function score2CResponse(bid, eval_) {
+  if (bid.type === 'pass') return score2CPass(bid);
+  if (bid.type !== 'contract') return scored(bid, 0, '');
+  const { level, strain } = bid;
+  if (level === 2 && strain === Strain.DIAMONDS) return score2CWaiting(bid, eval_);
+  if (level === 2 && strain === Strain.NOTRUMP) return score2CPos2NT(bid, eval_);
+  if (level === 2) return score2CPosSuit(bid, eval_);
+  if (level === 3 && strain !== Strain.NOTRUMP) return score2CPosSuit(bid, eval_);
+  return scoreGeneric2CResponse(bid, eval_);
+}
+
+// ── 2♣: Pass (illegal — 2♣ is forcing) ──────────────────────────────
+
+/** @param {import('../model/bid.js').Bid} bid */
+function score2CPass(bid) {
+  const sym = STRAIN_SYMBOLS[Strain.CLUBS];
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `2${sym} is forcing: cannot pass`, RESP_2C_PASS_COST);
+  return scored(bid, deduct(penTotal(p)), `2${sym} is absolutely forcing: must respond`, p);
+}
+
+// ── 2♣: 2♦ waiting / negative (0-7 HCP) ─────────────────────────────
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ */
+function score2CWaiting(bid, eval_) {
+  const { hcp } = eval_;
+  const dSym = STRAIN_SYMBOLS[Strain.DIAMONDS];
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  if (hcp >= RESP_2C_POS_MIN) {
+    pen(p, `${hcp} HCP: positive response available (${RESP_2C_POS_MIN}+)`,
+      (hcp - RESP_2C_NEG_MAX) * RESP_2C_POS_AVAIL_COST);
+  }
+  const expl = hcp <= RESP_2C_NEG_MAX
+    ? `${hcp} HCP: 2${dSym} waiting (0-${RESP_2C_NEG_MAX})`
+    : `${hcp} HCP: consider positive response instead of 2${dSym} waiting`;
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+// ── 2♣: Positive suit response (2♥/2♠ or 3♣/3♦, 8+ HCP, 5+ suit) ──
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ */
+function score2CPosSuit(bid, eval_) {
+  const { hcp, shape } = eval_;
+  const { level, strain } = /** @type {ContractBid} */ (bid);
+  const len = suitLen(shape, strain);
+  const name = STRAIN_DISPLAY[strain];
+  const sym = STRAIN_SYMBOLS[strain];
+  const cSym = STRAIN_SYMBOLS[Strain.CLUBS];
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${hcp} HCP, need ${RESP_2C_POS_MIN}+`,
+    Math.max(0, RESP_2C_POS_MIN - hcp) * HCP_COST);
+  pen(p, `${len} ${name}, need ${RESP_2C_POS_SUIT_LEN}+`,
+    Math.max(0, RESP_2C_POS_SUIT_LEN - len) * LENGTH_SHORT_COST);
+  pen(p, 'Longer suit available', posSuitPrefCost(strain, shape));
+
+  let expl;
+  if (hcp >= RESP_2C_POS_MIN && len >= RESP_2C_POS_SUIT_LEN) {
+    expl = `${hcp} HCP with ${len} ${name}: positive ${level}${sym} over 2${cSym}`;
+  } else if (len < RESP_2C_POS_SUIT_LEN) {
+    expl = `${len} ${name}: need ${RESP_2C_POS_SUIT_LEN}+ for positive suit response`;
+  } else {
+    expl = `${hcp} HCP: need ${RESP_2C_POS_MIN}+ for positive response`;
+  }
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+// ── 2♣: Positive 2NT (8+ HCP, balanced, no 5-card suit) ─────────────
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ */
+function score2CPos2NT(bid, eval_) {
+  const { hcp, shapeClass, shape } = eval_;
+  const cSym = STRAIN_SYMBOLS[Strain.CLUBS];
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${hcp} HCP, need ${RESP_2C_POS_MIN}+`,
+    Math.max(0, RESP_2C_POS_MIN - hcp) * HCP_COST);
+  pen(p, `${shapeClass} (need balanced)`, shapePenalty(shapeClass));
+  const maxLen = Math.max(...shape);
+  if (maxLen >= RESP_2C_POS_SUIT_LEN) {
+    pen(p, `Have ${maxLen}-card suit: prefer showing it`, RESP_2C_5CARD_NT_COST);
+  }
+
+  let expl;
+  if (hcp >= RESP_2C_POS_MIN && shapeClass === 'balanced' && maxLen < RESP_2C_POS_SUIT_LEN) {
+    expl = `${hcp} HCP, balanced: positive 2NT over 2${cSym}`;
+  } else if (shapeClass !== 'balanced') {
+    expl = 'Not balanced for 2NT positive response';
+  } else if (maxLen >= RESP_2C_POS_SUIT_LEN) {
+    expl = `Have ${maxLen}-card suit: prefer showing it`;
+  } else {
+    expl = `${hcp} HCP: need ${RESP_2C_POS_MIN}+ for positive 2NT`;
+  }
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+// ── 2♣: Generic (higher-level bids not specifically handled) ─────────
+
+/**
+ * @param {import('../model/bid.js').Bid} bid
+ * @param {Evaluation} eval_
+ * @returns {BidRecommendation}
+ */
+function scoreGeneric2CResponse(bid, eval_) {
+  const { hcp, shape, shapeClass } = eval_;
+  const { level, strain } = /** @type {ContractBid} */ (bid);
+  const minHcp = RESP_2C_POS_MIN + (level - 2) * RESP_HCP_PER_LEVEL;
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${hcp} HCP, need ${minHcp}+`, Math.max(0, minHcp - hcp) * HCP_COST);
+  if (strain === Strain.NOTRUMP) {
+    pen(p, `${shapeClass} (need balanced)`, shapePenalty(shapeClass));
+  } else {
+    const len = suitLen(shape, strain);
+    const name = STRAIN_DISPLAY[strain];
+    pen(p, `${len} ${name}, need ${RESP_2C_POS_SUIT_LEN}+`,
+      Math.max(0, RESP_2C_POS_SUIT_LEN - len) * LENGTH_SHORT_COST);
+  }
+  const sym = strain === Strain.NOTRUMP ? 'NT' : STRAIN_SYMBOLS[strain];
+  const cSym = STRAIN_SYMBOLS[Strain.CLUBS];
+  const expl = hcp < minHcp
+    ? `${hcp} HCP: ${level}${sym} over 2${cSym} needs ${minHcp}+ HCP`
+    : `${hcp} HCP: non-standard ${level}${sym} over 2${cSym}`;
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+// ── Responses to Weak Two (2♦/2♥/2♠) ────────────────────────────────
+
+/**
+ * Score every plausible response when partner opened a weak two.
+ * @param {Evaluation} eval_
+ * @param {import('../model/bid.js').Strain} ps - partner's suit
+ * @returns {BidRecommendation[]}
+ */
+function getWeakTwoResponseBids(eval_, ps) {
+  const candidates = weakTwoResponseCandidates(ps);
+  /** @type {BidRecommendation[]} */
+  const results = [];
+  for (const bid of candidates) {
+    results.push(scoreWeakTwoResponse(bid, eval_, ps));
+  }
+  return results.sort((a, b) => b.priority - a.priority);
+}
+
+function weakTwoResponseCandidates(ps) {
+  /** @type {import('../model/bid.js').Bid[]} */
+  const bids = [pass()];
+  for (let level = 2; level <= 7; level++) {
+    for (const strain of STRAIN_ORDER) {
+      if (level === 2 && !ranksAbove(strain, ps)) continue;
+      bids.push(contractBid(level, strain));
+    }
+  }
+  return bids;
+}
+
+/**
+ * @param {import('../model/bid.js').Bid} bid
+ * @param {Evaluation} eval_
+ * @param {import('../model/bid.js').Strain} ps
+ * @returns {BidRecommendation}
+ */
+function scoreWeakTwoResponse(bid, eval_, ps) {
+  if (bid.type === 'pass') return scoreWTPass(bid, eval_, ps);
+  if (bid.type !== 'contract') return scored(bid, 0, '');
+  const { level, strain } = bid;
+  if (level === 2 && strain === Strain.NOTRUMP) return scoreWT2NT(bid, eval_, ps);
+  if (level === 2) return scoreWTNewSuit(bid, eval_, ps);
+  if (level === 3 && strain === ps) return scoreWTSimpleRaise(bid, eval_, ps);
+  if (level === 3 && strain === Strain.NOTRUMP) return scoreWT3NT(bid, eval_, ps);
+  if (level === 3) return scoreWTNewSuit(bid, eval_, ps);
+  if (level === 4 && strain === ps && isMajor(ps)) return scoreWTGameRaise(bid, eval_, ps);
+  return scoreGenericWTResponse(bid, eval_, ps);
+}
+
+// ── Weak Two: Pass ───────────────────────────────────────────────────
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} ps */
+function scoreWTPass(bid, eval_, ps) {
+  const { hcp, shape } = eval_;
+  const support = suitLen(shape, ps);
+  const name = STRAIN_DISPLAY[ps];
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  if (hcp > WT_PASS_MAX) {
+    pen(p, `${hcp} HCP: game interest (${WT_PASS_MAX + 1}+)`, (hcp - WT_PASS_MAX) * HCP_COST);
+  }
+  if (support >= WT_RAISE_SUPPORT && hcp <= WT_RAISE_MAX_HCP) {
+    pen(p, `${support} ${name} support: consider raising`, WT_SUPPORT_PASS_COST);
+  }
+
+  let expl;
+  if (hcp > WT_PASS_MAX) {
+    expl = `${hcp} HCP: too strong to pass (consider game)`;
+  } else if (support >= WT_RAISE_SUPPORT) {
+    expl = `${support} ${name} support: consider preemptive raise`;
+  } else {
+    expl = `${hcp} HCP, no fit: pass partner's weak two`;
+  }
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+// ── Weak Two: 2NT Feature Ask (14-16 HCP, game interest) ────────────
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} ps */
+function scoreWT2NT(bid, eval_, ps) {
+  const { hcp, shape } = eval_;
+  const support = suitLen(shape, ps);
+  const name = STRAIN_DISPLAY[ps];
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${hcp} HCP, need ${WT_2NT_MIN}-${WT_2NT_MAX}`,
+    hcpDev(hcp, WT_2NT_MIN, WT_2NT_MAX) * HCP_COST);
+  if (support >= WT_RAISE_SUPPORT + 2) {
+    pen(p, `${support} ${name}: fit is clear, prefer raising`, WT_LONG_SUPPORT_2NT_COST);
+  }
+
+  let expl;
+  if (hcp >= WT_2NT_MIN && hcp <= WT_2NT_MAX) {
+    expl = `${hcp} HCP: 2NT feature ask (game interest)`;
+  } else if (hcp < WT_2NT_MIN) {
+    expl = `${hcp} HCP: need ${WT_2NT_MIN}+ for 2NT feature ask`;
+  } else {
+    expl = `${hcp} HCP: above 2NT range, consider bidding game`;
+  }
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+// ── Weak Two: Simple Raise (3-level, preemptive, 3+ support) ────────
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} ps */
+function scoreWTSimpleRaise(bid, eval_, ps) {
+  const { hcp, shape } = eval_;
+  const support = suitLen(shape, ps);
+  const name = STRAIN_DISPLAY[ps];
+  const sym = STRAIN_SYMBOLS[ps];
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${support} ${name}, need ${WT_RAISE_SUPPORT}+`,
+    Math.max(0, WT_RAISE_SUPPORT - support) * LENGTH_SHORT_COST);
+  if (hcp > WT_RAISE_MAX_HCP) {
+    pen(p, `${hcp} HCP: too strong for preemptive raise`,
+      (hcp - WT_RAISE_MAX_HCP) * HCP_COST);
+  }
+
+  let expl;
+  if (support < WT_RAISE_SUPPORT) {
+    expl = `${support} ${name}: need ${WT_RAISE_SUPPORT}+ to raise`;
+  } else if (hcp > WT_RAISE_MAX_HCP) {
+    expl = `${hcp} HCP: too strong for preemptive 3${sym}, consider game`;
+  } else {
+    expl = `${support} ${name} support: preemptive raise to 3${sym}`;
+  }
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+// ── Weak Two: 3NT (15-17 HCP, balanced) ─────────────────────────────
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} _ps */
+function scoreWT3NT(bid, eval_, _ps) {
+  const { hcp, shapeClass } = eval_;
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${hcp} HCP, need ${WT_3NT_MIN}-${WT_3NT_MAX}`,
+    hcpDev(hcp, WT_3NT_MIN, WT_3NT_MAX) * HCP_COST);
+  pen(p, `${shapeClass} (need balanced)`, shapePenalty(shapeClass));
+
+  let expl;
+  if (hcp >= WT_3NT_MIN && hcp <= WT_3NT_MAX && shapeClass === 'balanced') {
+    expl = `${hcp} HCP, balanced: 3NT`;
+  } else if (shapeClass !== 'balanced') {
+    expl = 'Not balanced for 3NT';
+  } else {
+    expl = `${hcp} HCP: outside 3NT range (${WT_3NT_MIN}-${WT_3NT_MAX})`;
+  }
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+// ── Weak Two: New Suit Forcing (16+ HCP, 5+ suit) ───────────────────
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} _ps */
+function scoreWTNewSuit(bid, eval_, _ps) {
+  const { hcp, shape } = eval_;
+  const { level, strain } = /** @type {ContractBid} */ (bid);
+  const len = suitLen(shape, strain);
+  const name = STRAIN_DISPLAY[strain];
+  const sym = STRAIN_SYMBOLS[strain];
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${hcp} HCP, need ${WT_NEW_SUIT_MIN}+`,
+    Math.max(0, WT_NEW_SUIT_MIN - hcp) * HCP_COST);
+  pen(p, `${len} ${name}, need ${WT_NEW_SUIT_LEN}+`,
+    Math.max(0, WT_NEW_SUIT_LEN - len) * LENGTH_SHORT_COST);
+
+  let expl;
+  if (hcp >= WT_NEW_SUIT_MIN && len >= WT_NEW_SUIT_LEN) {
+    expl = `${hcp} HCP with ${len} ${name}: ${level}${sym} forcing`;
+  } else if (hcp < WT_NEW_SUIT_MIN) {
+    expl = `${hcp} HCP: need ${WT_NEW_SUIT_MIN}+ for forcing new suit`;
+  } else {
+    expl = `${len} ${name}: need ${WT_NEW_SUIT_LEN}+ for new suit`;
+  }
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+// ── Weak Two: Game Raise (4♥/4♠, 14+ HCP or 5+ support) ────────────
+
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} ps */
+function scoreWTGameRaise(bid, eval_, ps) {
+  const { hcp, shape } = eval_;
+  const support = suitLen(shape, ps);
+  const name = STRAIN_DISPLAY[ps];
+  const sym = STRAIN_SYMBOLS[ps];
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${support} ${name}, need ${WT_GAME_SUPPORT}+`,
+    Math.max(0, WT_GAME_SUPPORT - support) * LENGTH_SHORT_COST);
+  const minHcp = support >= WT_GAME_PREEMPT_SUPPORT
+    ? WT_GAME_PREEMPT_MIN_HCP
+    : WT_GAME_MIN_HCP;
+  pen(p, `${hcp} HCP, need ${minHcp}+`, Math.max(0, minHcp - hcp) * HCP_COST);
+
+  let expl;
+  if (support < WT_GAME_SUPPORT) {
+    expl = `${support} ${name}: need ${WT_GAME_SUPPORT}+ for game raise`;
+  } else if (hcp < minHcp) {
+    expl = `${hcp} HCP: need ${minHcp}+ for game raise to 4${sym}`;
+  } else if (support >= WT_GAME_PREEMPT_SUPPORT) {
+    expl = `${support} ${name} support: preemptive 4${sym}`;
+  } else {
+    expl = `${hcp} HCP with ${support} ${name}: game raise to 4${sym}`;
+  }
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+// ── Weak Two: Generic (unhandled bids over weak two) ─────────────────
+
+/**
+ * @param {import('../model/bid.js').Bid} bid
+ * @param {Evaluation} eval_
+ * @param {import('../model/bid.js').Strain} ps
+ * @returns {BidRecommendation}
+ */
+function scoreGenericWTResponse(bid, eval_, ps) {
+  const { hcp, shape, shapeClass } = eval_;
+  const { level, strain } = /** @type {ContractBid} */ (bid);
+  const minHcp = WT_2NT_MIN + Math.max(0, level - 3) * RESP_HCP_PER_LEVEL;
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${hcp} HCP, need ${minHcp}+`, Math.max(0, minHcp - hcp) * HCP_COST);
+  if (strain === Strain.NOTRUMP) {
+    pen(p, `${shapeClass} (need balanced)`, shapePenalty(shapeClass));
+  } else if (strain === ps) {
+    const support = suitLen(shape, ps);
+    pen(p, `${support} support, need ${WT_RAISE_SUPPORT}+`,
+      Math.max(0, WT_RAISE_SUPPORT - support) * LENGTH_SHORT_COST);
+  } else {
+    const len = suitLen(shape, strain);
+    const name = STRAIN_DISPLAY[strain];
+    pen(p, `${len} ${name}, need ${WT_NEW_SUIT_LEN}+`,
+      Math.max(0, WT_NEW_SUIT_LEN - len) * LENGTH_SHORT_COST);
+  }
+  const sym = strain === Strain.NOTRUMP ? 'NT' : STRAIN_SYMBOLS[strain];
+  const expl = hcp < minHcp
+    ? `${hcp} HCP: ${level}${sym} over weak two needs ${minHcp}+ HCP`
+    : `${hcp} HCP: non-standard ${level}${sym} over weak two`;
+  return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
 /** @param {number[]} shape @param {import('../model/bid.js').Strain} strain */
@@ -751,6 +1592,24 @@ function hasSuitAt1(shape, partnerStrain) {
     }
   }
   return false;
+}
+
+/**
+ * Penalty for bidding a suit that isn't the longest when responding positively to 2♣.
+ * All suits are candidates since 2♣ is artificial.
+ * @param {import('../model/bid.js').Strain} strain
+ * @param {number[]} shape
+ */
+function posSuitPrefCost(strain, shape) {
+  let maxLen = 0;
+  for (const s of SHAPE_STRAINS) {
+    if (suitLen(shape, s) > maxLen) maxLen = suitLen(shape, s);
+  }
+  const thisLen = suitLen(shape, strain);
+  if (thisLen >= RESP_2C_POS_SUIT_LEN && thisLen < maxLen && maxLen >= RESP_2C_POS_SUIT_LEN) {
+    return (maxLen - thisLen) * SUIT_PREF_COST;
+  }
+  return 0;
 }
 
 /**

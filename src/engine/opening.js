@@ -61,6 +61,10 @@ const PREEMPT_LEVEL_OFFSET = 4;
 const MAX_PREEMPT_LEVEL = 4;
 const WEAK_TWO_MIN_HONORS = 2;
 
+const LONG_SUIT_LOW_OPEN_COST = 3;  // per card above 7 when opening at 1-level
+const STRONG_PREEMPT_HCP_BONUS = 6; // HCP allowance for 8+ card preempts
+const WEAK_TWO_SIDE_MAJOR_COST = 2; // per card in side 4+ card major
+
 const RULE_OF_20 = 20;
 const RULE_OF_15 = 15;
 
@@ -277,6 +281,9 @@ function score1Suit(bid, eval_, seatPos) {
   if (seatPos === 4 && hcp >= hcpMin && !meetsRuleOf15(hcp, shape)) {
     pen(p, '4th seat: Rule of 15 not met', RULE_15_COST);
   }
+  if (len >= 8) {
+    pen(p, `${len}-card suit: consider opening higher`, (len - 7) * LONG_SUIT_LOW_OPEN_COST);
+  }
 
   return scored(bid, deduct(penTotal(p)), suit1Explanation(hcp, len, strain, shape, shapeClass), p);
 }
@@ -318,12 +325,23 @@ function scoreWeakTwo(bid, hand, eval_, seatPos) {
   pen(p, `${len} ${name}, too long for weak two`, len > WEAK_TWO_LENGTH ? (len - WEAK_TWO_LENGTH) * LENGTH_LONG_COST : 0);
   if (len === WEAK_TWO_LENGTH && !hasSuitQuality(hand, strain)) pen(p, 'Poor suit quality', SUIT_QUALITY_COST);
 
-  return scored(bid, deduct(penTotal(p)), weakTwoExplanation(hcp, len, strain, penTotal(p)), p);
+  const sideMajorLen = Math.max(
+    strain !== Strain.SPADES ? shape[0] : 0,
+    strain !== Strain.HEARTS ? shape[1] : 0
+  );
+  if (sideMajorLen >= 4) {
+    pen(p, `${sideMajorLen}-card side major`, sideMajorLen * WEAK_TWO_SIDE_MAJOR_COST);
+  }
+
+  return scored(bid, deduct(penTotal(p)), weakTwoExplanation(hcp, len, strain, penTotal(p), sideMajorLen), p);
 }
 
-function weakTwoExplanation(hcp, len, strain, penalty) {
+function weakTwoExplanation(hcp, len, strain, penalty, sideMajorLen) {
   const sym = STRAIN_SYMBOLS[strain];
   const name = STRAIN_DISPLAY[strain];
+  if (sideMajorLen >= 4) {
+    return `${sideMajorLen}-card side major: avoid weak 2${sym}`;
+  }
   if (penalty < 0.5) return `${hcp} HCP with good 6-card ${name}: weak 2${sym}`;
   if (len !== WEAK_TWO_LENGTH) {
     return `${len} ${name}: need exactly 6 for weak 2${sym}`;
@@ -370,9 +388,11 @@ function scorePreempt(bid, eval_, seatPos) {
 
   if (seatPos === 4) return scored(bid, 0, 'Preempts not used in 4th seat');
 
+  const hcpMax = len >= 8 ? PREEMPT_MAX_HCP + STRONG_PREEMPT_HCP_BONUS : PREEMPT_MAX_HCP;
+
   /** @type {PenaltyItem[]} */
   const p = [];
-  pen(p, `${hcp} HCP, max ${PREEMPT_MAX_HCP} for preempt`, Math.max(0, hcp - PREEMPT_MAX_HCP) * HCP_COST);
+  pen(p, `${hcp} HCP, max ${hcpMax} for preempt`, Math.max(0, hcp - hcpMax) * HCP_COST);
   const ideal = idealPreemptLevel(len);
   if (ideal === 0) {
     pen(p, `${len} ${name}, need ${PREEMPT_MIN_LENGTH}+`, (PREEMPT_MIN_LENGTH - len) * LENGTH_SHORT_COST);
@@ -380,7 +400,7 @@ function scorePreempt(bid, eval_, seatPos) {
   } else {
     pen(p, `Level ${level} vs ideal ${ideal}`, Math.abs(level - ideal) * PREEMPT_LEVEL_COST);
   }
-  return scored(bid, deduct(penTotal(p)), preemptExplanation(hcp, len, level, ideal, strain), p);
+  return scored(bid, deduct(penTotal(p)), preemptExplanation(hcp, len, level, ideal, strain, hcpMax), p);
 }
 
 function idealPreemptLevel(suitLen) {
@@ -388,13 +408,16 @@ function idealPreemptLevel(suitLen) {
   return Math.min(suitLen - PREEMPT_LEVEL_OFFSET, MAX_PREEMPT_LEVEL);
 }
 
-function preemptExplanation(hcp, len, level, ideal, strain) {
+function preemptExplanation(hcp, len, level, ideal, strain, hcpMax) {
   const name = STRAIN_DISPLAY[strain];
   const sym = STRAIN_SYMBOLS[strain];
   if (ideal === 0) return `${len} ${name}: too short for ${level}${sym}`;
   if (level !== ideal) return `${len}-card ${name}: ${ideal}${sym} is more standard than ${level}${sym}`;
-  if (hcp > PREEMPT_MAX_HCP) {
-    return `${hcp} HCP is strong for a preempt, but ${len} ${name} supports ${level}${sym}`;
+  if (hcp > hcpMax) {
+    return `${hcp} HCP is too strong for a preempt ${level}${sym}`;
+  }
+  if (len >= 8 && hcp > PREEMPT_MAX_HCP) {
+    return `${hcp} HCP with ${len}-card ${name}: strong ${level}${sym} opening`;
   }
   return `${hcp} HCP with ${len}-card ${name}: ${level}${sym} preempt`;
 }

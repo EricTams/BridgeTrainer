@@ -1,5 +1,5 @@
 import { SEATS } from '../model/deal.js';
-import { isComplete } from '../model/bid.js';
+import { Strain, isComplete } from '../model/bid.js';
 
 /**
  * @typedef {import('../model/bid.js').Auction} Auction
@@ -65,6 +65,26 @@ export function findOwnBid(auction, playerSeat) {
 }
 
 /**
+ * Find the most recent contract bid made by the given seat.
+ * Unlike findOwnBid (which returns the first), this returns the latest.
+ * @param {Auction} auction
+ * @param {Seat} playerSeat
+ * @returns {import('../model/bid.js').ContractBid | null}
+ */
+export function findOwnLastBid(auction, playerSeat) {
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  /** @type {import('../model/bid.js').ContractBid | null} */
+  let last = null;
+  for (let i = 0; i < auction.bids.length; i++) {
+    const seat = SEATS[(dealerIdx + i) % SEATS.length];
+    if (seat === playerSeat && auction.bids[i].type === 'contract') {
+      last = /** @type {import('../model/bid.js').ContractBid} */ (auction.bids[i]);
+    }
+  }
+  return last;
+}
+
+/**
  * Find the first contract bid made by a given seat's partner.
  * @param {Auction} auction
  * @param {Seat} playerSeat
@@ -77,6 +97,331 @@ export function findPartnerBid(auction, playerSeat) {
     const seat = SEATS[(dealerIdx + i) % SEATS.length];
     if (seat === partner && auction.bids[i].type === 'contract') {
       return /** @type {import('../model/bid.js').ContractBid} */ (auction.bids[i]);
+    }
+  }
+  return null;
+}
+
+/**
+ * Find the most recent contract bid made by partner.
+ * Unlike findPartnerBid (which returns the first), this returns the latest.
+ * @param {Auction} auction
+ * @param {Seat} playerSeat
+ * @returns {import('../model/bid.js').ContractBid | null}
+ */
+export function findPartnerLastBid(auction, playerSeat) {
+  const partner = PARTNER_SEAT[playerSeat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  /** @type {import('../model/bid.js').ContractBid | null} */
+  let last = null;
+  for (let i = 0; i < auction.bids.length; i++) {
+    const seat = SEATS[(dealerIdx + i) % SEATS.length];
+    if (seat === partner && auction.bids[i].type === 'contract') {
+      last = /** @type {import('../model/bid.js').ContractBid} */ (auction.bids[i]);
+    }
+  }
+  return last;
+}
+
+/**
+ * Find the most recent contract bid made by an opponent of the given seat.
+ * Returns the latest (not first) opponent bid so competitive evaluations
+ * target the current contract rather than the original opening.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {import('../model/bid.js').ContractBid | null}
+ */
+export function findOpponentBid(auction, seat) {
+  const partner = PARTNER_SEAT[seat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  /** @type {import('../model/bid.js').ContractBid | null} */
+  let latest = null;
+  for (let i = 0; i < auction.bids.length; i++) {
+    const bidSeat = SEATS[(dealerIdx + i) % SEATS.length];
+    if (bidSeat !== seat && bidSeat !== partner && auction.bids[i].type === 'contract') {
+      latest = /** @type {import('../model/bid.js').ContractBid} */ (auction.bids[i]);
+    }
+  }
+  return latest;
+}
+
+/**
+ * Check if any opponent has made a contract bid.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {boolean}
+ */
+export function hasOpponentBids(auction, seat) {
+  return findOpponentBid(auction, seat) !== null;
+}
+
+/**
+ * Check if partner has made a (takeout) double.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {boolean}
+ */
+export function hasPartnerDoubled(auction, seat) {
+  const partner = PARTNER_SEAT[seat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  for (let i = 0; i < auction.bids.length; i++) {
+    const bidSeat = SEATS[(dealerIdx + i) % SEATS.length];
+    if (bidSeat === partner && auction.bids[i].type === 'double') return true;
+  }
+  return false;
+}
+
+/**
+ * Check if the given seat is in the balancing (passout) position --
+ * i.e. the next pass would end the auction.
+ * @param {Auction} auction
+ * @returns {boolean}
+ */
+export function isBalancingSeat(auction) {
+  const bids = auction.bids;
+  if (bids.length < 3) return false;
+  if (!bids.some(b => b.type === 'contract')) return false;
+  const last2 = bids.slice(-2);
+  return last2.every(b => b.type === 'pass');
+}
+
+/**
+ * Collect all strains bid by opponents of the given seat.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {Set<import('../model/bid.js').Strain>}
+ */
+export function opponentStrains(auction, seat) {
+  const partner = PARTNER_SEAT[seat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  /** @type {Set<import('../model/bid.js').Strain>} */
+  const strains = new Set();
+  for (let i = 0; i < auction.bids.length; i++) {
+    const b = auction.bids[i];
+    const s = SEATS[(dealerIdx + i) % SEATS.length];
+    if (s !== seat && s !== partner && b.type === 'contract') {
+      strains.add(/** @type {import('../model/bid.js').ContractBid} */ (b).strain);
+    }
+  }
+  return strains;
+}
+
+/**
+ * Collect all strains naturally bid by the partnership (seat + partner).
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {Set<import('../model/bid.js').Strain>}
+ */
+export function partnershipStrains(auction, seat) {
+  const partner = PARTNER_SEAT[seat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  /** @type {Set<import('../model/bid.js').Strain>} */
+  const strains = new Set();
+  for (let i = 0; i < auction.bids.length; i++) {
+    const b = auction.bids[i];
+    const s = SEATS[(dealerIdx + i) % SEATS.length];
+    if ((s === seat || s === partner) && b.type === 'contract') {
+      strains.add(/** @type {import('../model/bid.js').ContractBid} */ (b).strain);
+    }
+  }
+  return strains;
+}
+
+/**
+ * Count how many contract bids a seat has made so far.
+ * Used to distinguish first rebid from continuation turns.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {number}
+ */
+export function countOwnBids(auction, seat) {
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  let count = 0;
+  for (let i = 0; i < auction.bids.length; i++) {
+    const bidSeat = SEATS[(dealerIdx + i) % SEATS.length];
+    if (bidSeat === seat && auction.bids[i].type === 'contract') count++;
+  }
+  return count;
+}
+
+/**
+ * Check whether a seat was the first player to make a contract bid (the opener).
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {boolean}
+ */
+export function isOpener(auction, seat) {
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  for (let i = 0; i < auction.bids.length; i++) {
+    if (auction.bids[i].type === 'contract') {
+      return SEATS[(dealerIdx + i) % SEATS.length] === seat;
+    }
+  }
+  return false;
+}
+
+/**
+ * Find the contract bid that a given seat doubled.
+ * Scans the auction for a double by the given seat, then returns
+ * the most recent contract bid preceding that double.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {import('../model/bid.js').ContractBid | null}
+ */
+export function findDoubledBid(auction, seat) {
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  for (let i = 0; i < auction.bids.length; i++) {
+    const bidSeat = SEATS[(dealerIdx + i) % SEATS.length];
+    if (bidSeat === seat && auction.bids[i].type === 'double') {
+      for (let j = i - 1; j >= 0; j--) {
+        if (auction.bids[j].type === 'contract') {
+          return /** @type {import('../model/bid.js').ContractBid} */ (auction.bids[j]);
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Check if the given seat has made a double in this auction.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {boolean}
+ */
+export function hasPlayerDoubled(auction, seat) {
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  for (let i = 0; i < auction.bids.length; i++) {
+    const bidSeat = SEATS[(dealerIdx + i) % SEATS.length];
+    if (bidSeat === seat && auction.bids[i].type === 'double') return true;
+  }
+  return false;
+}
+
+/**
+ * Check whether any opponent made a contract bid after partner's
+ * last contract bid. Used to detect interference in forcing sequences.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {boolean}
+ */
+export function hasInterferenceAfterPartner(auction, seat) {
+  const partner = PARTNER_SEAT[seat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  let partnerBidIdx = -1;
+  for (let i = auction.bids.length - 1; i >= 0; i--) {
+    const bidSeat = SEATS[(dealerIdx + i) % SEATS.length];
+    if (bidSeat === partner && auction.bids[i].type === 'contract') {
+      partnerBidIdx = i;
+      break;
+    }
+  }
+  if (partnerBidIdx === -1) return false;
+  for (let i = partnerBidIdx + 1; i < auction.bids.length; i++) {
+    const bidSeat = SEATS[(dealerIdx + i) % SEATS.length];
+    if (bidSeat !== seat && bidSeat !== partner && auction.bids[i].type === 'contract') {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Check if the last contract bid in the auction belongs to an opponent
+ * of the given seat. Used to detect when opponents have outbid the partnership.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {boolean}
+ */
+export function opponentsOutbidPartnership(auction, seat) {
+  const partner = PARTNER_SEAT[seat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  let lastBidSeat = null;
+  for (let i = auction.bids.length - 1; i >= 0; i--) {
+    if (auction.bids[i].type === 'contract') {
+      lastBidSeat = SEATS[(dealerIdx + i) % SEATS.length];
+      break;
+    }
+  }
+  if (!lastBidSeat) return false;
+  return lastBidSeat !== seat && lastBidSeat !== partner;
+}
+
+/**
+ * Find the most recent contract bid made by the partnership (player or partner).
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {import('../model/bid.js').ContractBid | null}
+ */
+export function lastPartnershipContractBid(auction, seat) {
+  const partner = PARTNER_SEAT[seat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  for (let i = auction.bids.length - 1; i >= 0; i--) {
+    const bidSeat = SEATS[(dealerIdx + i) % SEATS.length];
+    if ((bidSeat === seat || bidSeat === partner) && auction.bids[i].type === 'contract') {
+      return /** @type {import('../model/bid.js').ContractBid} */ (auction.bids[i]);
+    }
+  }
+  return null;
+}
+
+/**
+ * Estimate the minimum combined HCP for the partnership based on the
+ * bidding so far.  When both partners have made contract bids, the
+ * floor is the sum of the minimum each bid implies.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {number}
+ */
+export function partnershipMinHcp(auction, seat) {
+  const partner = PARTNER_SEAT[seat];
+  const ownBid = findOwnBid(auction, seat);
+  const partnerBid = findPartnerBid(auction, seat);
+  if (!ownBid || !partnerBid) return 0;
+
+  return bidMinHcp(ownBid, isOpener(auction, seat)) +
+         bidMinHcp(partnerBid, isOpener(auction, partner));
+}
+
+/**
+ * Minimum HCP implied by a single contract bid.
+ * @param {import('../model/bid.js').ContractBid} bid
+ * @param {boolean} opener
+ * @returns {number}
+ */
+function bidMinHcp(bid, opener) {
+  const { level, strain } = bid;
+  if (opener) {
+    if (level === 1 && strain === Strain.NOTRUMP) return 15;
+    if (level === 2 && strain === Strain.NOTRUMP) return 20;
+    if (level === 2 && strain === Strain.CLUBS) return 22;
+    if (level === 2) return 5;
+    if (level >= 3) return 5;
+    return 13;
+  }
+  if (strain === Strain.NOTRUMP && level === 1) return 6;
+  if (strain === Strain.NOTRUMP && level >= 2) return 10;
+  if (level >= 2) return 10;
+  return 6;
+}
+
+/**
+ * Find the contract bid targeted by a given seat's MOST RECENT double.
+ * Unlike findDoubledBid (which returns the first), this returns the latest.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {import('../model/bid.js').ContractBid | null}
+ */
+export function findLastDoubledBid(auction, seat) {
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  for (let i = auction.bids.length - 1; i >= 0; i--) {
+    const bidSeat = SEATS[(dealerIdx + i) % SEATS.length];
+    if (bidSeat === seat && auction.bids[i].type === 'double') {
+      for (let j = i - 1; j >= 0; j--) {
+        if (auction.bids[j].type === 'contract') {
+          return /** @type {import('../model/bid.js').ContractBid} */ (auction.bids[j]);
+        }
+      }
     }
   }
   return null;

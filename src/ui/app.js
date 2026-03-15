@@ -10,6 +10,7 @@ import { renderEval } from './eval-display.js';
 import { renderAuction } from './auction-display.js';
 import { renderBidSelector } from './bid-selector.js';
 import { renderResult } from './result-display.js';
+import { simulateAuction, formatSimulations } from '../testing/simulator.js';
 
 /**
  * @typedef {import('../puzzle/generator.js').Puzzle} Puzzle
@@ -28,7 +29,7 @@ const ADVISOR_MIN_PRIORITY = 4;
  * @param {HTMLElement} root
  */
 export function initApp(root) {
-  const { ratingBar, positionEl, auctionEl, handEl, evalEl, toolsEl, actionEl } = buildLayout(root);
+  const { ratingBar, positionEl, auctionEl, handEl, evalEl, toolsEl, testEl, actionEl } = buildLayout(root);
 
   /** @type {Puzzle} */
   let puzzle;
@@ -37,6 +38,8 @@ export function initApp(root) {
   /** @type {Bid | null} */
   let playerBid = null;
   let advisorExpanded = false;
+  /** @type {string | null} */
+  let testData = null;
 
   startPuzzle();
 
@@ -62,6 +65,39 @@ export function initApp(root) {
     render();
   }
 
+  function handleGenerate1() {
+    testData = formatSimulations([simulateAuction()]);
+    render();
+  }
+
+  function handleGenerateTests() {
+    const results = [];
+    for (let i = 0; i < 10; i++) {
+      results.push(simulateAuction());
+    }
+    testData = formatSimulations(results);
+    render();
+  }
+
+  async function handleCopyTests() {
+    if (!testData) return;
+    try {
+      await navigator.clipboard.writeText(testData);
+      const copyBtn = testEl.querySelector('.test-copy-btn');
+      if (copyBtn) {
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => { copyBtn.textContent = 'Copy Test Data'; }, 1500);
+      }
+    } catch (_) {
+      const ta = document.createElement('textarea');
+      ta.value = testData;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+  }
+
   function render() {
     const hand = puzzle.hands[PLAYER_SEAT];
     const pos = seatPosition(puzzle.dealer, PLAYER_SEAT);
@@ -74,6 +110,7 @@ export function initApp(root) {
 
     const isBidding = !(result && playerBid);
     renderTools(hand, puzzle.auction, isBidding, advisorExpanded, startPuzzle, toggleAdvisor, toolsEl);
+    renderTestPanel(testData, handleGenerate1, handleGenerateTests, handleCopyTests, testEl);
 
     if (!isBidding) {
       renderResult({
@@ -104,14 +141,15 @@ function buildLayout(root) {
   const handEl = el('div');
   const evalEl = el('div');
   const toolsEl = el('div');
+  const testEl = el('div');
   const actionEl = el('div');
 
   root.append(ratingBar, columns);
   columns.append(colInfo, colAction);
-  colInfo.append(positionEl, auctionEl, handEl, evalEl, toolsEl);
+  colInfo.append(positionEl, auctionEl, handEl, evalEl, toolsEl, testEl);
   colAction.append(actionEl);
 
-  return { ratingBar, positionEl, auctionEl, handEl, evalEl, toolsEl, actionEl };
+  return { ratingBar, positionEl, auctionEl, handEl, evalEl, toolsEl, testEl, actionEl };
 }
 
 /**
@@ -193,7 +231,7 @@ function buildAdvisorList(hand, auction) {
 /**
  * @param {number} pos
  * @param {import('../model/deal.js').Seat} dealer
- * @param {'opening' | 'responding' | 'rebid'} puzzleType
+ * @param {'opening' | 'responding' | 'rebid' | 'competitive'} puzzleType
  * @param {HTMLElement} container
  */
 function renderPositionInfo(pos, dealer, puzzleType, container) {
@@ -204,6 +242,7 @@ function renderPositionInfo(pos, dealer, puzzleType, container) {
   let typeLabel;
   if (puzzleType === 'responding') typeLabel = 'Responding';
   else if (puzzleType === 'rebid') typeLabel = 'Opener Rebid';
+  else if (puzzleType === 'competitive') typeLabel = 'Competitive';
   else typeLabel = `Opening (${ordinal} seat)`;
   container.textContent = `${typeLabel} \u00B7 Dealer: ${SEAT_NAMES[dealer]}`;
 }
@@ -220,6 +259,48 @@ function renderRatingBar(rating, container) {
   }
   const avg = (rating.totalPoints / rating.puzzleCount).toFixed(1);
   container.textContent = `Puzzles: ${rating.puzzleCount}  \u00B7  Average: ${avg} / 10`;
+}
+
+/**
+ * Render the test-auction panel with Generate and Copy buttons.
+ * @param {string | null} testData
+ * @param {() => void} onGenerate1
+ * @param {() => void} onGenerate10
+ * @param {() => void} onCopy
+ * @param {HTMLElement} container
+ */
+function renderTestPanel(testData, onGenerate1, onGenerate10, onCopy, container) {
+  container.innerHTML = '';
+  container.className = 'test-panel';
+
+  const btnRow = el('div', 'tools-btn-row');
+
+  const gen1Btn = document.createElement('button');
+  gen1Btn.className = 'tools-btn test-gen-btn';
+  gen1Btn.textContent = '1 Test Deal';
+  gen1Btn.addEventListener('click', onGenerate1);
+  btnRow.appendChild(gen1Btn);
+
+  const gen10Btn = document.createElement('button');
+  gen10Btn.className = 'tools-btn test-gen-btn';
+  gen10Btn.textContent = '10 Test Deals';
+  gen10Btn.addEventListener('click', onGenerate10);
+  btnRow.appendChild(gen10Btn);
+
+  if (testData) {
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'tools-btn test-copy-btn';
+    copyBtn.textContent = 'Copy';
+    copyBtn.addEventListener('click', onCopy);
+    btnRow.appendChild(copyBtn);
+
+    const charCount = el('span', 'test-info');
+    const lines = testData.split('\n').length;
+    charCount.textContent = `${lines} lines`;
+    btnRow.appendChild(charCount);
+  }
+
+  container.appendChild(btnRow);
 }
 
 /**
