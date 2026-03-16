@@ -1,4 +1,5 @@
-import { addBid, bidToString } from '../model/bid.js';
+import { addBid, bidToString, createAuction, pass, isComplete, currentSeat } from '../model/bid.js';
+import { SEATS } from '../model/deal.js';
 import { evaluate } from '../engine/evaluate.js';
 import { seatPosition } from '../engine/context.js';
 import { getRecommendations } from '../engine/advisor.js';
@@ -10,6 +11,7 @@ import { renderEval } from './eval-display.js';
 import { renderAuction } from './auction-display.js';
 import { renderBidSelector } from './bid-selector.js';
 import { renderResult } from './result-display.js';
+import { renderBreakdown } from './breakdown-display.js';
 import { simulateAuction, formatSimulations } from '../testing/simulator.js';
 
 /**
@@ -29,7 +31,7 @@ const ADVISOR_MIN_PRIORITY = 4;
  * @param {HTMLElement} root
  */
 export function initApp(root) {
-  const { ratingBar, positionEl, auctionEl, handEl, evalEl, toolsEl, testEl, actionEl } = buildLayout(root);
+  const { ratingBar, positionEl, auctionEl, handEl, evalEl, breakdownEl, toolsEl, testEl, actionEl } = buildLayout(root);
 
   /** @type {Puzzle} */
   let puzzle;
@@ -40,6 +42,11 @@ export function initApp(root) {
   let advisorExpanded = false;
   /** @type {string | null} */
   let testData = null;
+  /** @type {import('../model/bid.js').Auction | null} */
+  let completedAuction = null;
+  /** @type {import('./breakdown-display.js').BidAnnotation[] | null} */
+  let bidAnnotations = null;
+  let showHandPostBid = false;
 
   startPuzzle();
 
@@ -47,6 +54,9 @@ export function initApp(root) {
     puzzle = generatePuzzle();
     result = null;
     playerBid = null;
+    completedAuction = null;
+    bidAnnotations = null;
+    showHandPostBid = false;
     render();
   }
 
@@ -57,11 +67,21 @@ export function initApp(root) {
     addResult(result.points);
     puzzle.auction = addBid(puzzle.auction, bid);
     playerBid = bid;
+
+    const playerBidIdx = puzzle.auction.bids.length - 1;
+    const completed = completeAndAnnotate(puzzle.hands, puzzle.auction, puzzle.dealer, playerBidIdx);
+    completedAuction = completed.completedAuction;
+    bidAnnotations = completed.annotations;
     render();
   }
 
   function toggleAdvisor() {
     advisorExpanded = !advisorExpanded;
+    render();
+  }
+
+  function toggleHandPostBid() {
+    showHandPostBid = !showHandPostBid;
     render();
   }
 
@@ -101,26 +121,44 @@ export function initApp(root) {
   function render() {
     const hand = puzzle.hands[PLAYER_SEAT];
     const pos = seatPosition(puzzle.dealer, PLAYER_SEAT);
+    const isBidding = !(result && playerBid);
 
     renderPositionInfo(pos, puzzle.dealer, puzzle.type, positionEl);
-    renderAuction(puzzle.auction, auctionEl);
-    renderHand(hand, handEl);
-    renderEval(evaluate(hand), evalEl);
     renderRatingBar(getRating(), ratingBar);
-
-    const isBidding = !(result && playerBid);
     renderTools(hand, puzzle.auction, isBidding, advisorExpanded, startPuzzle, toggleAdvisor, toolsEl);
     renderTestPanel(testData, handleGenerate1, handleGenerateTests, handleCopyTests, testEl);
 
-    if (!isBidding) {
+    if (isBidding) {
+      renderAuction(puzzle.auction, auctionEl);
+      renderHand(hand, handEl);
+      renderEval(evaluate(hand), evalEl);
+      breakdownEl.innerHTML = '';
+      breakdownEl.className = '';
+      renderBidSelector(puzzle.auction, actionEl, handleBid);
+    } else {
+      renderAuction(completedAuction || puzzle.auction, auctionEl);
+      if (showHandPostBid) {
+        renderHand(hand, handEl);
+        renderEval(evaluate(hand), evalEl);
+      } else {
+        handEl.innerHTML = '';
+        handEl.className = '';
+        evalEl.innerHTML = '';
+        evalEl.className = '';
+      }
+      renderBreakdown({
+        annotations: bidAnnotations || [],
+        completedAuction: completedAuction || puzzle.auction,
+        playerSeat: PLAYER_SEAT,
+        handVisible: showHandPostBid,
+        onToggleHand: toggleHandPostBid,
+      }, breakdownEl);
       renderResult({
         playerBid: /** @type {Bid} */ (playerBid),
         points: result.points,
         recommendations: result.recommendations,
         onNext: startPuzzle,
       }, actionEl);
-    } else {
-      renderBidSelector(puzzle.auction, actionEl, handleBid);
     }
   }
 }
@@ -140,16 +178,17 @@ function buildLayout(root) {
   const auctionEl = el('div');
   const handEl = el('div');
   const evalEl = el('div');
+  const breakdownEl = el('div');
   const toolsEl = el('div');
   const testEl = el('div');
   const actionEl = el('div');
 
   root.append(ratingBar, columns);
   columns.append(colInfo, colAction);
-  colInfo.append(positionEl, auctionEl, handEl, evalEl, toolsEl, testEl);
+  colInfo.append(positionEl, auctionEl, handEl, evalEl, breakdownEl, toolsEl, testEl);
   colAction.append(actionEl);
 
-  return { ratingBar, positionEl, auctionEl, handEl, evalEl, toolsEl, testEl, actionEl };
+  return { ratingBar, positionEl, auctionEl, handEl, evalEl, breakdownEl, toolsEl, testEl, actionEl };
 }
 
 /**
@@ -312,4 +351,89 @@ function el(tag, className) {
   const e = document.createElement(tag);
   if (className) e.className = className;
   return e;
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// AUCTION COMPLETION & ANNOTATION
+// ═════════════════════════════════════════════════════════════════════
+
+const MAX_COMPLETION_BIDS = 60;
+
+/**
+ * Complete the auction from the current state and annotate every bid
+ * (pre-player, player's, and engine-completed) with explanations.
+ *
+ * @param {import('../model/deal.js').Deal} hands
+ * @param {import('../model/bid.js').Auction} auctionSoFar
+ * @param {import('../model/deal.js').Seat} dealer
+ * @param {number} playerBidIndex
+ * @returns {{
+ *   completedAuction: import('../model/bid.js').Auction,
+ *   annotations: import('./breakdown-display.js').BidAnnotation[],
+ * }}
+ */
+function completeAndAnnotate(hands, auctionSoFar, dealer, playerBidIndex) {
+  /** @type {import('./breakdown-display.js').BidAnnotation[]} */
+  const annotations = [];
+  const dealerIdx = SEATS.indexOf(dealer);
+
+  let replay = createAuction(dealer);
+  for (let i = 0; i < auctionSoFar.bids.length; i++) {
+    const seat = SEATS[(dealerIdx + i) % SEATS.length];
+    const bid = auctionSoFar.bids[i];
+    let explanation = '';
+
+    try {
+      const recs = getRecommendations(hands[seat], replay, seat);
+      const matched = recs.find(r => bidMatches(r.bid, bid));
+      explanation = matched ? matched.explanation : '';
+    } catch (_) { /* engine error — leave blank */ }
+
+    annotations.push({ seat, bid, explanation, isPlayer: i === playerBidIndex });
+    replay = addBid(replay, bid);
+  }
+
+  let current = auctionSoFar;
+  while (!isComplete(current) && current.bids.length < MAX_COMPLETION_BIDS) {
+    const seat = currentSeat(current);
+
+    let recs;
+    try {
+      recs = getRecommendations(hands[seat], current, seat);
+    } catch (_) {
+      recs = [];
+    }
+
+    const chosen = recs.length > 0
+      ? recs[0]
+      : { bid: pass(), priority: 0, explanation: 'No recommendations' };
+
+    annotations.push({
+      seat,
+      bid: chosen.bid,
+      explanation: chosen.explanation,
+      isPlayer: false,
+    });
+
+    try {
+      current = addBid(current, chosen.bid);
+    } catch (_) {
+      current = addBid(current, pass());
+    }
+  }
+
+  return { completedAuction: current, annotations };
+}
+
+/**
+ * @param {import('../model/bid.js').Bid} a
+ * @param {import('../model/bid.js').Bid} b
+ * @returns {boolean}
+ */
+function bidMatches(a, b) {
+  if (a.type !== b.type) return false;
+  if (a.type === 'contract' && b.type === 'contract') {
+    return a.level === b.level && a.strain === b.strain;
+  }
+  return true;
 }
