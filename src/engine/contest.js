@@ -129,6 +129,12 @@ function detectContestForcing(auction, seat) {
     if (s === seat && auction.bids[i].type === 'contract') return false;
   }
 
+  // An opponent's double relieves the forcing obligation — we can pass
+  // the double for penalty instead of being forced to bid.
+  for (let i = partnerLastIdx + 1; i < auction.bids.length; i++) {
+    if (auction.bids[i].type === 'double') return false;
+  }
+
   const ownBid = findOwnBid(auction, seat);
   if (!ownBid) return false;
 

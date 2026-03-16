@@ -27,6 +27,7 @@ import { getRecommendations } from './advisor.js';
  *   seats: [Seat, Seat],
  *   combinedHcp: number,
  *   combinedTotalPts: number,
+ *   combinedEffectivePts: number,
  *   bestFitSuit: import('../model/card.js').Suit,
  *   bestFitLength: number,
  *   hasMajorFit: boolean,
@@ -122,19 +123,59 @@ function analyzePartnership(partnership, seats, hands) {
 
   const bestFit = suitFits[0];
 
-  const expectedLevel = computeExpectedLevel(combinedHcp, combinedTotalPts, hasMajorFit, bestFit);
+  const combinedEffectivePts = computeEffectivePoints(
+    eval0, eval1, combinedHcp, combinedTotalPts, bestFit);
+
+  const expectedLevel = computeExpectedLevel(
+    combinedHcp, combinedEffectivePts, hasMajorFit, bestFit);
 
   return {
     partnership,
     seats: /** @type {[Seat, Seat]} */ (seats),
     combinedHcp,
     combinedTotalPts,
+    combinedEffectivePts,
     bestFitSuit: bestFit.suit,
     bestFitLength: bestFit.length,
     hasMajorFit,
     expectedLevel,
     suitFits,
   };
+}
+
+/**
+ * Context-aware point count. Distribution points only help with a trump
+ * fit; without one, HCP alone determine trick-taking potential. A misfit
+ * (each partner short in the other's long suit) actively hurts.
+ * @param {Evaluation} eval0
+ * @param {Evaluation} eval1
+ * @param {number} combinedHcp
+ * @param {number} combinedTotalPts
+ * @param {{ suit: import('../model/card.js').Suit, length: number }} bestFit
+ * @returns {number}
+ */
+function computeEffectivePoints(eval0, eval1, combinedHcp, combinedTotalPts, bestFit) {
+  if (bestFit.length >= 8) {
+    return combinedTotalPts;
+  }
+  // No 8-card fit — distribution doesn't generate extra tricks.
+  // Check for misfit: each partner short in the other's long suit.
+  const longest0 = indexOfMax(eval0.shape);
+  const longest1 = indexOfMax(eval1.shape);
+  const misfitPenalty =
+    (eval0.shape[longest1] <= 1 && eval1.shape[longest0] <= 1) ? 3 :
+    (eval0.shape[longest1] <= 1 || eval1.shape[longest0] <= 1) ? 1 : 0;
+
+  return combinedHcp - misfitPenalty;
+}
+
+/** @param {number[]} arr */
+function indexOfMax(arr) {
+  let maxIdx = 0;
+  for (let i = 1; i < arr.length; i++) {
+    if (arr[i] > arr[maxIdx]) maxIdx = i;
+  }
+  return maxIdx;
 }
 
 /**
@@ -171,28 +212,20 @@ function computeFits(hand1, hand2) {
  * @param {{ suit: import('../model/card.js').Suit, length: number }} bestFit
  * @returns {string}
  */
-function computeExpectedLevel(hcp, totalPts, hasMajorFit, bestFit) {
-  if (totalPts >= 37) {
-    if (hasMajorFit) return '7M (grand slam in major)';
-    return '7NT (grand slam)';
-  }
-  if (totalPts >= 33) {
-    if (hasMajorFit) return '6M (small slam in major)';
-    return '6NT (small slam)';
-  }
-  if (totalPts >= 26) {
-    if (hasMajorFit) return '4M (major game)';
-    if (bestFit.length >= 9 && (bestFit.suit === 'D' || bestFit.suit === 'C')) {
-      return '5m (minor game)';
-    }
-    return '3NT (notrump game)';
-  }
-  if (totalPts >= 23) {
-    return 'Invitational (partial or game)';
-  }
-  if (totalPts >= 20) {
-    return 'Partscore';
-  }
+function computeExpectedLevel(hcp, effectivePts, hasMajorFit, bestFit) {
+  const hasMinorFit = bestFit.length >= 9 && (bestFit.suit === 'D' || bestFit.suit === 'C');
+  const hasFit = hasMajorFit || hasMinorFit;
+  const pts = effectivePts;
+
+  if (hasFit && pts >= 37) return hasMajorFit ? '7M (grand slam in major)' : '7m (grand slam in minor)';
+  if (hcp >= 37) return '7NT (grand slam)';
+  if (hasFit && pts >= 33) return hasMajorFit ? '6M (small slam in major)' : '6m (small slam in minor)';
+  if (hcp >= 33) return '6NT (small slam)';
+  if (hasMajorFit && pts >= 26) return '4M (major game)';
+  if (hasMinorFit && pts >= 29) return '5m (minor game)';
+  if (hcp >= 25) return '3NT (notrump game)';
+  if (pts >= 23) return 'Invitational (partial or game)';
+  if (pts >= 20) return 'Partscore';
   return 'Pass / low partscore';
 }
 
@@ -320,9 +353,17 @@ function computeVerdict(sim, winningSide, winnerAnalysis, nsAnalysis, ewAnalysis
   if (sim.aborted) return 'ABORTED: Auction exceeded max bids (likely engine loop)';
 
   if (!sim.finalContract) {
-    const strongerSide = nsAnalysis.combinedHcp >= ewAnalysis.combinedHcp ? nsAnalysis : ewAnalysis;
-    if (strongerSide.combinedTotalPts >= 20) {
-      return `UNDERBID: Passed out but ${strongerSide.partnership} has ${strongerSide.combinedHcp} combined HCP (${strongerSide.combinedTotalPts} total pts) — expected ${strongerSide.expectedLevel}`;
+    const strongerSide = nsAnalysis.combinedEffectivePts >= ewAnalysis.combinedEffectivePts
+      ? nsAnalysis : ewAnalysis;
+    if (strongerSide.combinedEffectivePts >= 20) {
+      const seats = strongerSide.seats;
+      const ev0 = evaluate(sim.hands[seats[0]]);
+      const ev1 = evaluate(sim.hands[seats[1]]);
+      const maxHcp = Math.max(ev0.hcp, ev1.hcp);
+      if (maxHcp < 12) {
+        return `REASONABLE: Passed out — ${strongerSide.partnership} has ${strongerSide.combinedHcp} combined HCP but no player has opening strength (max ${maxHcp} HCP)`;
+      }
+      return `UNDERBID: Passed out but ${strongerSide.partnership} has ${strongerSide.combinedHcp} combined HCP (${strongerSide.combinedEffectivePts} effective pts) — expected ${strongerSide.expectedLevel}`;
     }
     return 'REASONABLE: Passed out with neither side having clear values';
   }
@@ -331,7 +372,7 @@ function computeVerdict(sim, winningSide, winnerAnalysis, nsAnalysis, ewAnalysis
 
   const level = sim.finalContract.level;
   const strain = sim.finalContract.strain;
-  const pts = winnerAnalysis.combinedTotalPts;
+  const pts = winnerAnalysis.combinedEffectivePts;
   const hcp = winnerAnalysis.combinedHcp;
 
   const isGame = (strain === 'NT' && level >= 3) ||
@@ -343,10 +384,10 @@ function computeVerdict(sim, winningSide, winnerAnalysis, nsAnalysis, ewAnalysis
   const loserAnalysis = winningSide === 'NS' ? ewAnalysis : nsAnalysis;
   const competitive = wasCompetitiveAuction(sim.bidLog);
 
-  if (loserAnalysis.combinedTotalPts > winnerAnalysis.combinedTotalPts + 3) {
-    const ptDiff = loserAnalysis.combinedTotalPts - winnerAnalysis.combinedTotalPts;
+  if (loserAnalysis.combinedEffectivePts > winnerAnalysis.combinedEffectivePts + 3) {
+    const ptDiff = loserAnalysis.combinedEffectivePts - winnerAnalysis.combinedEffectivePts;
     const preempted = didSidePreempt(sim.bidLog, winningSide);
-    const loserPts = loserAnalysis.combinedTotalPts;
+    const loserPts = loserAnalysis.combinedEffectivePts;
 
     if (ptDiff <= 5 && loserPts < 26) {
       return 'REASONABLE: Competitive hand — both sides have similar values';
@@ -354,10 +395,10 @@ function computeVerdict(sim, winningSide, winnerAnalysis, nsAnalysis, ewAnalysis
 
     if (preempted) {
       if (loserPts >= 33) {
-        return `PREEMPT: ${winningSide} shut out ${loserAnalysis.partnership} slam (${loserAnalysis.combinedHcp} HCP, ${loserPts} pts) — opponents should overcome`;
+        return `PREEMPT: ${winningSide} shut out ${loserAnalysis.partnership} slam (${loserAnalysis.combinedHcp} HCP, ${loserPts} effective pts) — opponents should overcome`;
       }
       if (loserPts >= 26) {
-        return `PREEMPT: ${winningSide} disrupted ${loserAnalysis.partnership} game (${loserAnalysis.combinedHcp} HCP, ${loserPts} pts)`;
+        return `PREEMPT: ${winningSide} disrupted ${loserAnalysis.partnership} game (${loserAnalysis.combinedHcp} HCP, ${loserPts} effective pts)`;
       }
       return `PREEMPT: ${winningSide} effective — ${loserAnalysis.partnership} (${loserAnalysis.combinedHcp} HCP) lacked game values`;
     }
@@ -375,22 +416,22 @@ function computeVerdict(sim, winningSide, winnerAnalysis, nsAnalysis, ewAnalysis
 
   if (isGrand) {
     if (pts < 37) return competitive
-      ? `INTERFERENCE: Grand slam overbid in contested auction (${pts} pts)`
-      : `OVERBID: Grand slam with only ${pts} total pts (need ~37)`;
+      ? `INTERFERENCE: Grand slam overbid in contested auction (${pts} effective pts)`
+      : `OVERBID: Grand slam with only ${pts} effective pts (need ~37)`;
     return 'EXCELLENT: Grand slam reached with appropriate strength';
   }
 
   if (isSlam) {
     if (pts < 33) return competitive
-      ? `INTERFERENCE: Slam overbid in contested auction (${pts} pts)`
-      : `OVERBID: Slam with only ${pts} total pts (need ~33)`;
+      ? `INTERFERENCE: Slam overbid in contested auction (${pts} effective pts)`
+      : `OVERBID: Slam with only ${pts} effective pts (need ~33)`;
     return 'GOOD: Slam reached with appropriate strength';
   }
 
   if (isGame) {
     if (pts < 23) return competitive
-      ? `INTERFERENCE: Game overbid in contested auction (${pts} pts)`
-      : `OVERBID: Game contract with only ${pts} total pts`;
+      ? `INTERFERENCE: Game overbid in contested auction (${pts} effective pts)`
+      : `OVERBID: Game contract with only ${pts} effective pts`;
     if (pts >= 26) return 'GOOD: Game reached with game-level values';
     return 'ACCEPTABLE: Game reached on invitational values';
   }
@@ -400,8 +441,8 @@ function computeVerdict(sim, winningSide, winnerAnalysis, nsAnalysis, ewAnalysis
       ? ` (${winnerAnalysis.partnership} has ${winnerAnalysis.bestFitLength}-card ${winnerAnalysis.bestFitSuit === 'S' ? 'spade' : 'heart'} fit)`
       : '';
     return competitive
-      ? `INTERFERENCE: ${winningSide} underbid in contested auction (${pts} pts)${fitNote}`
-      : `UNDERBID: Stopped at partscore with ${pts} total pts — expected ${winnerAnalysis.expectedLevel}${fitNote}`;
+      ? `INTERFERENCE: ${winningSide} underbid in contested auction (${pts} effective pts)${fitNote}`
+      : `UNDERBID: Stopped at partscore with ${pts} effective pts — expected ${winnerAnalysis.expectedLevel}${fitNote}`;
   }
 
   if (pts >= 23) return 'REASONABLE: Partscore on invitational values (game was close)';
@@ -470,7 +511,8 @@ export function formatAuditReport(sim, audit) {
       .map(f => `${SUIT_SYM[f.suit]}${f.length}`)
       .join(', ');
     lines.push(
-      `  ${a.partnership}: ${a.combinedHcp} HCP, ${a.combinedTotalPts} total pts` +
+      `  ${a.partnership}: ${a.combinedHcp} HCP, ${a.combinedEffectivePts} effective pts` +
+      (a.combinedEffectivePts !== a.combinedTotalPts ? ` (${a.combinedTotalPts} raw)` : '') +
       `  |  Fits: ${fitDesc || 'none ≥7'}` +
       `  |  Expected: ${a.expectedLevel}`
     );

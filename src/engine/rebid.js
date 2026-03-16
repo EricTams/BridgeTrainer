@@ -4,7 +4,7 @@ import { SEATS } from '../model/deal.js';
 import {
   opponentStrains, hasInterferenceAfterPartner,
   findPartnerBid, findPartnerLastBid, findOwnBid, findOwnLastBid, isOpener,
-  partnershipMinHcp,
+  partnershipMinHcp, seatStrengthFloor,
 } from './context.js';
 import { pen, penTotal } from './penalty.js';
 
@@ -102,11 +102,12 @@ export function getRebidBids(hand, eval_, myBid, partnerBid, auction, seat, open
   const effectivePartnerBid = resolvePartnerBid(partnerBid, myBid, oppSuits);
 
   const interf = seat ? hasInterferenceAfterPartner(auction, seat) : false;
+  const strengthFloor = seat ? seatStrengthFloor(auction, seat) : 0;
   const candidates = rebidCandidates(auction);
   /** @type {BidRecommendation[]} */
   const results = [];
   for (const bid of candidates) {
-    results.push(scoreRebid(bid, hand, eval_, myBid, effectivePartnerBid, !!opener, interf));
+    results.push(scoreRebid(bid, hand, eval_, myBid, effectivePartnerBid, !!opener, interf, strengthFloor));
   }
   return results.sort((a, b) => b.priority - a.priority);
 }
@@ -159,17 +160,21 @@ function isHigher(a, b) {
  * @param {ContractBid} partnerBid
  * @param {boolean} opener
  * @param {boolean} interf - true if opponents bid after partner
+ * @param {number} strengthFloor - minimum HCP shown through competitive actions
  * @returns {BidRecommendation}
  */
-function scoreRebid(bid, hand, eval_, myBid, partnerBid, opener, interf) {
+function scoreRebid(bid, hand, eval_, myBid, partnerBid, opener, interf, strengthFloor) {
   if (myBid.level === 1 && myBid.strain === Strain.NOTRUMP) {
     return score1NTRebid(bid, hand, eval_, partnerBid, interf);
   }
   if (myBid.level === 1) {
-    return score1SuitRebid(bid, eval_, myBid, partnerBid, opener);
+    return score1SuitRebid(bid, eval_, myBid, partnerBid, opener, strengthFloor);
   }
   if (myBid.level === 2 && myBid.strain !== Strain.CLUBS && myBid.strain !== Strain.NOTRUMP) {
     return scoreWeakTwoRebid(bid, hand, eval_, myBid, partnerBid);
+  }
+  if (myBid.level >= 3 && myBid.strain !== Strain.NOTRUMP) {
+    return scorePreemptRebid(bid, eval_, myBid, partnerBid);
   }
   return scoreGenericRebid(bid, eval_);
 }
@@ -429,18 +434,19 @@ function scoreAfterGame(bid) {
  * @param {ContractBid} myBid
  * @param {ContractBid} partnerBid
  * @param {boolean} opener
+ * @param {number} strengthFloor
  * @returns {BidRecommendation}
  */
-function score1SuitRebid(bid, eval_, myBid, partnerBid, opener) {
+function score1SuitRebid(bid, eval_, myBid, partnerBid, opener, strengthFloor) {
   const ms = myBid.strain;
   const ps = partnerBid.strain;
   const pl = partnerBid.level;
 
-  if (ps === ms && pl === 2) return scoreAfterSingleRaise(bid, eval_, myBid);
-  if (ps === ms && pl === 3) return scoreAfterLimitRaise(bid, eval_, myBid);
+  if (ps === ms && pl === 2) return scoreAfterSingleRaise(bid, eval_, myBid, strengthFloor);
+  if (ps === ms && pl === 3) return scoreAfterLimitRaise(bid, eval_, myBid, strengthFloor);
   if (ps === Strain.NOTRUMP && pl === 1) return scoreAfter1NTResp(bid, eval_, myBid);
   if (ps === Strain.NOTRUMP && pl === 2) return scoreAfter2NTResp(bid, eval_, myBid);
-  return scoreAfterNewSuit(bid, eval_, myBid, partnerBid, opener);
+  return scoreAfterNewSuit(bid, eval_, myBid, partnerBid, opener, strengthFloor);
 }
 
 // ── After new suit response (forcing one round) ─────────────────────
@@ -451,9 +457,10 @@ function score1SuitRebid(bid, eval_, myBid, partnerBid, opener) {
  * @param {ContractBid} myBid
  * @param {ContractBid} partnerBid
  * @param {boolean} opener - only the opener is forced to rebid after responder's new suit
+ * @param {number} strengthFloor
  * @returns {BidRecommendation}
  */
-function scoreAfterNewSuit(bid, eval_, myBid, partnerBid, opener) {
+function scoreAfterNewSuit(bid, eval_, myBid, partnerBid, opener, strengthFloor) {
   if (bid.type === 'pass') {
     if (opener) {
       /** @type {PenaltyItem[]} */ const p = [];
@@ -471,7 +478,7 @@ function scoreAfterNewSuit(bid, eval_, myBid, partnerBid, opener) {
   if (level === 1 && strain === Strain.NOTRUMP) return scoreNS_1NT(bid, eval_, ms, ps);
   if (level === 1) return scoreNS_newSuit1(bid, eval_, ps);
   if (strain === ms) return scoreNS_rebidOwn(bid, eval_, ps);
-  if (strain === ps) return scoreNS_raisePartner(bid, eval_, ps);
+  if (strain === ps) return scoreNS_raisePartner(bid, eval_, ps, strengthFloor);
   if (strain === Strain.NOTRUMP) return scoreNS_nt(bid, eval_);
   if (level === 2 && ranksAbove(strain, ms)) return scoreNS_reverse(bid, eval_);
   return scoreNS_newSuit(bid, eval_, ps);
@@ -550,20 +557,26 @@ function scoreNS_rebidOwn(bid, eval_, ps) {
 }
 
 /** Raise partner's suit (level determines minimum vs invitational vs game). */
-function scoreNS_raisePartner(bid, eval_, ps) {
+function scoreNS_raisePartner(bid, eval_, ps, strengthFloor) {
   const { hcp, shape } = eval_;
   const { level } = /** @type {ContractBid} */ (bid);
   const sup = suitLen(shape, ps);
   const name = STRAIN_DISPLAY[ps];
   const sym = STRAIN_SYMBOLS[ps];
+
+  const shownExtras = Math.min(4, Math.max(0, (strengthFloor || 0) - MIN_MIN));
+  const effInvMin = INV_MIN - shownExtras;
+  const effInvMax = Math.max(effInvMin, INV_MAX - shownExtras);
+  const effGFMin = GF_MIN - shownExtras;
+
   /** @type {PenaltyItem[]} */ const p = [];
   pen(p, `${sup} ${name}, need ${FIT_MIN}+`, Math.max(0, FIT_MIN - sup) * LENGTH_SHORT_COST);
   if (level <= 2) {
     pen(p, `${hcp} HCP, need ${MIN_MIN}-${MIN_MAX}`, hcpDev(hcp, MIN_MIN, MIN_MAX) * HCP_COST);
   } else if (level === 3) {
-    pen(p, `${hcp} HCP, need ${INV_MIN}-${INV_MAX}`, hcpDev(hcp, INV_MIN, INV_MAX) * HCP_COST);
+    pen(p, `${hcp} HCP, need ${effInvMin}-${effInvMax}`, hcpDev(hcp, effInvMin, effInvMax) * HCP_COST);
   } else {
-    pen(p, `${hcp} HCP, need ${GF_MIN}+`, Math.max(0, GF_MIN - hcp) * HCP_COST);
+    pen(p, `${hcp} HCP, need ${effGFMin}+`, Math.max(0, effGFMin - hcp) * HCP_COST);
   }
   const tag = level <= 2 ? 'minimum raise' : level === 3 ? 'invitational raise' : 'game raise';
   const expl = sup < FIT_MIN
@@ -643,21 +656,28 @@ function scoreNS_newSuit(bid, eval_, ps) {
  * @param {Bid} bid
  * @param {Evaluation} eval_
  * @param {ContractBid} myBid
+ * @param {number} strengthFloor
  * @returns {BidRecommendation}
  */
-function scoreAfterSingleRaise(bid, eval_, myBid) {
+function scoreAfterSingleRaise(bid, eval_, myBid, strengthFloor) {
   const { hcp, totalPoints } = eval_;
   const tp = totalPoints;
   const ms = myBid.strain;
   const sym = STRAIN_SYMBOLS[ms];
   const isMaj = isMajor(ms);
 
+  const shownExtras = Math.min(4, Math.max(0, (strengthFloor || 0) - MIN_MIN));
+  const effPassMax = RAISE_PASS_MAX - shownExtras;
+  const effInvMin = RAISE_INV_MIN - shownExtras;
+  const effInvMax = Math.max(effInvMin, RAISE_INV_MAX - shownExtras);
+  const effGameMin = RAISE_GAME_MIN - shownExtras;
+
   if (bid.type === 'pass') {
     /** @type {PenaltyItem[]} */ const p = [];
     pen(p, `${tp} total pts above pass threshold`,
-      Math.max(0, tp - RAISE_PASS_MAX) * HCP_COST);
+      Math.max(0, tp - effPassMax) * HCP_COST);
     return scored(bid, deduct(penTotal(p)),
-      tp <= RAISE_PASS_MAX ? `${hcp} HCP (${tp} total): minimum, pass` : `${hcp} HCP (${tp} total): too strong to pass`, p);
+      tp <= effPassMax ? `${hcp} HCP (${tp} total): minimum, pass` : `${hcp} HCP (${tp} total): too strong to pass`, p);
   }
   if (bid.type !== 'contract') return scored(bid, 0, '');
 
@@ -665,31 +685,41 @@ function scoreAfterSingleRaise(bid, eval_, myBid) {
 
   if (level === 3 && strain === ms) {
     /** @type {PenaltyItem[]} */ const p = [];
-    pen(p, `${tp} total pts, need ${RAISE_INV_MIN}-${RAISE_INV_MAX}`,
-      hcpDev(tp, RAISE_INV_MIN, RAISE_INV_MAX) * HCP_COST);
+    pen(p, `${tp} total pts, need ${effInvMin}-${effInvMax}`,
+      hcpDev(tp, effInvMin, effInvMax) * HCP_COST);
     return scored(bid, deduct(penTotal(p)),
-      hcpDev(tp, RAISE_INV_MIN, RAISE_INV_MAX) === 0
+      hcpDev(tp, effInvMin, effInvMax) === 0
         ? `${hcp} HCP (${tp} total): invite with 3${sym}`
-        : `${hcp} HCP (${tp} total): outside invite range (${RAISE_INV_MIN}-${RAISE_INV_MAX})`, p);
+        : `${hcp} HCP (${tp} total): outside invite range (${effInvMin}-${effInvMax})`, p);
   }
 
   if (level === 4 && strain === ms && isMaj) {
     /** @type {PenaltyItem[]} */ const p = [];
-    pen(p, `${tp} total pts, need ${RAISE_GAME_MIN}+`,
-      Math.max(0, RAISE_GAME_MIN - tp) * HCP_COST);
+    pen(p, `${tp} total pts, need ${effGameMin}+`,
+      Math.max(0, effGameMin - tp) * HCP_COST);
     return scored(bid, deduct(penTotal(p)),
-      tp >= RAISE_GAME_MIN
+      tp >= effGameMin
         ? `${hcp} HCP (${tp} total): bid game 4${sym}`
-        : `${hcp} HCP (${tp} total): need ${RAISE_GAME_MIN}+ for game`, p);
+        : `${hcp} HCP (${tp} total): need ${effGameMin}+ for game`, p);
   }
 
   if (level === 3 && strain === Strain.NOTRUMP) {
     /** @type {PenaltyItem[]} */ const p = [];
-    pen(p, `${hcp} HCP, need ${RAISE_GAME_MIN}+`,
-      Math.max(0, RAISE_GAME_MIN - hcp) * HCP_COST);
+    pen(p, `${hcp} HCP, need ${effGameMin}+`,
+      Math.max(0, effGameMin - hcp) * HCP_COST);
     pen(p, `${eval_.shapeClass} (prefer balanced)`, shapePenalty(eval_.shapeClass));
     if (isMaj) pen(p, 'Have major fit: prefer 4 of major', MAJOR_FIT_GAME_COST);
     return scored(bid, deduct(penTotal(p)), `${hcp} HCP: 3NT as game alternative`, p);
+  }
+
+  if (level === 2 && strain === Strain.NOTRUMP) {
+    /** @type {PenaltyItem[]} */ const p = [];
+    pen(p, `${hcp} HCP, need ${REBID_2NT_MIN}-${REBID_2NT_MAX}`,
+      hcpDev(hcp, REBID_2NT_MIN, REBID_2NT_MAX) * HCP_COST);
+    pen(p, `${eval_.shapeClass} (need balanced)`, shapePenalty(eval_.shapeClass));
+    if (isMaj) pen(p, 'Major fit agreed: prefer raising', MAJOR_FIT_GAME_COST);
+    return scored(bid, deduct(penTotal(p)),
+      isMaj ? 'Major fit: prefer raising over 2NT' : `${hcp} HCP: 2NT rebid`, p);
   }
 
   return scoreGenericRebid(bid, eval_);
@@ -701,22 +731,26 @@ function scoreAfterSingleRaise(bid, eval_, myBid) {
  * @param {Bid} bid
  * @param {Evaluation} eval_
  * @param {ContractBid} myBid
+ * @param {number} strengthFloor
  * @returns {BidRecommendation}
  */
-function scoreAfterLimitRaise(bid, eval_, myBid) {
+function scoreAfterLimitRaise(bid, eval_, myBid, strengthFloor) {
   const { hcp } = eval_;
   const ms = myBid.strain;
   const sym = STRAIN_SYMBOLS[ms];
   const isMaj = isMajor(ms);
 
+  const shownExtras = Math.min(4, Math.max(0, (strengthFloor || 0) - MIN_MIN));
+  const effAcceptMin = LIMIT_ACCEPT_MIN - shownExtras;
+
   if (bid.type === 'pass') {
     /** @type {PenaltyItem[]} */ const p = [];
-    if (hcp >= LIMIT_ACCEPT_MIN) {
-      pen(p, `${hcp} HCP: should accept (${LIMIT_ACCEPT_MIN}+)`,
-        (hcp - LIMIT_ACCEPT_MIN + 1) * HCP_COST);
+    if (hcp >= effAcceptMin) {
+      pen(p, `${hcp} HCP: should accept (${effAcceptMin}+)`,
+        (hcp - effAcceptMin + 1) * HCP_COST);
     }
     return scored(bid, deduct(penTotal(p)),
-      hcp < LIMIT_ACCEPT_MIN
+      hcp < effAcceptMin
         ? `${hcp} HCP: decline invitation`
         : `${hcp} HCP: should accept game`, p);
   }
@@ -726,31 +760,31 @@ function scoreAfterLimitRaise(bid, eval_, myBid) {
 
   if (level === 4 && strain === ms && isMaj) {
     /** @type {PenaltyItem[]} */ const p = [];
-    if (hcp < LIMIT_ACCEPT_MIN) {
-      pen(p, `${hcp} HCP, need ${LIMIT_ACCEPT_MIN}+`,
-        (LIMIT_ACCEPT_MIN - hcp) * HCP_COST);
+    if (hcp < effAcceptMin) {
+      pen(p, `${hcp} HCP, need ${effAcceptMin}+`,
+        (effAcceptMin - hcp) * HCP_COST);
     }
     return scored(bid, deduct(penTotal(p)),
-      hcp >= LIMIT_ACCEPT_MIN
+      hcp >= effAcceptMin
         ? `${hcp} HCP: accept, bid 4${sym}`
         : `${hcp} HCP: too weak to accept`, p);
   }
 
   if (level === 3 && strain === Strain.NOTRUMP && !isMaj) {
     /** @type {PenaltyItem[]} */ const p = [];
-    if (hcp < LIMIT_ACCEPT_MIN) {
-      pen(p, `${hcp} HCP, need ${LIMIT_ACCEPT_MIN}+`,
-        (LIMIT_ACCEPT_MIN - hcp) * HCP_COST);
+    if (hcp < effAcceptMin) {
+      pen(p, `${hcp} HCP, need ${effAcceptMin}+`,
+        (effAcceptMin - hcp) * HCP_COST);
     }
     return scored(bid, deduct(penTotal(p)),
-      hcp >= LIMIT_ACCEPT_MIN ? `${hcp} HCP: 3NT game` : `${hcp} HCP: too weak for game`, p);
+      hcp >= effAcceptMin ? `${hcp} HCP: 3NT game` : `${hcp} HCP: too weak for game`, p);
   }
 
   if (level === 5 && strain === ms && !isMaj) {
     /** @type {PenaltyItem[]} */ const p = [];
-    if (hcp < LIMIT_ACCEPT_MIN) {
-      pen(p, `${hcp} HCP, need ${LIMIT_ACCEPT_MIN}+`,
-        (LIMIT_ACCEPT_MIN - hcp) * HCP_COST);
+    if (hcp < effAcceptMin) {
+      pen(p, `${hcp} HCP, need ${effAcceptMin}+`,
+        (effAcceptMin - hcp) * HCP_COST);
     }
     return scored(bid, deduct(penTotal(p)), `${hcp} HCP: 5${sym} game`, p);
   }
@@ -1070,6 +1104,67 @@ function findFeatureSuit(hand, weakSuit) {
     if (hasFeat) return strain;
   }
   return null;
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// PREEMPT REBIDS (3-level+ openers)
+// ═════════════════════════════════════════════════════════════════════
+
+/**
+ * @param {Bid} bid
+ * @param {Evaluation} eval_
+ * @param {ContractBid} myBid
+ * @param {ContractBid} partnerBid
+ * @returns {BidRecommendation}
+ */
+function scorePreemptRebid(bid, eval_, myBid, partnerBid) {
+  const ms = myBid.strain;
+  const ps = partnerBid.strain;
+  const pl = partnerBid.level;
+
+  if (ps === ms) return scoreAfterWTRaise(bid);
+  if (ps === Strain.NOTRUMP && pl >= 3) return scoreAfterGame(bid);
+  if (isGameLevel(partnerBid)) return scoreAfterGame(bid);
+
+  if (ps !== ms && ps !== Strain.NOTRUMP) {
+    const { shape } = eval_;
+    if (bid.type === 'pass') {
+      /** @type {PenaltyItem[]} */ const p = [];
+      pen(p, 'New suit over preempt is forcing', FORCING_PASS_COST);
+      return scored(bid, deduct(penTotal(p)), 'New suit over preempt is forcing: must bid', p);
+    }
+    if (bid.type !== 'contract') return scored(bid, 0, '');
+
+    const { level, strain } = bid;
+
+    if (strain === ms) {
+      /** @type {PenaltyItem[]} */ const p = [];
+      const sup = suitLen(shape, ps);
+      if (sup >= 3) pen(p, `${sup} ${STRAIN_DISPLAY[ps]}: prefer raising partner`, FIT_PREF_COST);
+      return scored(bid, deduct(penTotal(p)),
+        `Rebid ${STRAIN_SYMBOLS[ms]}: no support for partner's suit`, p);
+    }
+
+    if (strain === ps) {
+      const sup = suitLen(shape, ps);
+      /** @type {PenaltyItem[]} */ const p = [];
+      if (sup < 3) pen(p, `Only ${sup} ${STRAIN_DISPLAY[ps]}: need 3+ to raise`,
+        (3 - sup) * LENGTH_SHORT_COST);
+      return scored(bid, deduct(penTotal(p)),
+        sup >= 3
+          ? `${sup} ${STRAIN_DISPLAY[ps]}: raise partner's suit`
+          : `Only ${sup} ${STRAIN_DISPLAY[ps]}: need 3+ to raise`, p);
+    }
+
+    if (strain === Strain.NOTRUMP && level === 3) {
+      /** @type {PenaltyItem[]} */ const p = [];
+      return scored(bid, deduct(penTotal(p)), '3NT: game', p);
+    }
+
+    return scoreGenericRebid(bid, eval_);
+  }
+
+  return scoreGenericRebid(bid, eval_);
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -1715,6 +1810,11 @@ export function getContinuationBids(hand, eval_, auction, seat) {
   const forcing = partnerLast ? contDetectForcing(auction, seat, partnerLast) : false;
   const fitStrain = contFindFit(eval_, auction, seat);
   const pRange = contEstimatePartnerRange(auction, seat);
+  const partnerFloor = seatStrengthFloor(auction, CONT_PARTNER[seat]);
+  if (partnerFloor > pRange.min) {
+    pRange.min = partnerFloor;
+    if (pRange.max < pRange.min) pRange.max = pRange.min;
+  }
   const combinedMin = eval_.hcp + pRange.min;
   const combinedMax = eval_.hcp + pRange.max;
   const pSuits = contPartnerSuits(auction, seat);
@@ -1748,9 +1848,6 @@ export function getContinuationBids(hand, eval_, auction, seat) {
 function contDetectForcing(auction, seat, partnerLast) {
   if (isGameLevel(partnerLast)) return false;
 
-  const oppSuits = opponentStrains(auction, seat);
-  if (partnerLast.strain !== Strain.NOTRUMP && oppSuits.has(partnerLast.strain)) return true;
-
   const partner = CONT_PARTNER[seat];
   const dealerIdx = SEATS.indexOf(auction.dealer);
 
@@ -1768,7 +1865,14 @@ function contDetectForcing(auction, seat, partnerLast) {
       const s = SEATS[(dealerIdx + i) % SEATS.length];
       if (s === seat && auction.bids[i].type === 'contract') return false;
     }
+    // A double after partner's forcing bid relieves the obligation
+    for (let i = partnerLastIdx + 1; i < auction.bids.length; i++) {
+      if (auction.bids[i].type === 'double') return false;
+    }
   }
+
+  const oppSuits = opponentStrains(auction, seat);
+  if (partnerLast.strain !== Strain.NOTRUMP && oppSuits.has(partnerLast.strain)) return true;
 
   if (partnerLast.strain !== Strain.NOTRUMP && partnerLastIdx >= 0) {
     /** @type {Set<import('../model/bid.js').Strain>} */
@@ -1800,6 +1904,13 @@ function contDetectForcing(auction, seat, partnerLast) {
   const ownFirst = findOwnBid(auction, seat);
   if (ownFirst && ownFirst.level === 2 && ownFirst.strain === Strain.CLUBS &&
       isOpener(auction, seat)) {
+    return true;
+  }
+
+  if (partnerFirst && partnerFirst.level === 2 &&
+      partnerFirst.strain !== Strain.NOTRUMP &&
+      partnerLast.level >= 3 &&
+      !isOpener(auction, partner)) {
     return true;
   }
 
@@ -1917,7 +2028,11 @@ function contEstimatePartnerRange(auction, seat) {
       else range = { min: 13, max: 17 };
     } else {
       const ownFirst = findOwnBid(auction, seat);
-      if (ownFirst && ownFirst.strain === strain) {
+      if (ownFirst && ownFirst.level === 1 && ownFirst.strain === Strain.NOTRUMP &&
+          isOpener(auction, seat) && level === 2 &&
+          (strain === Strain.DIAMONDS || strain === Strain.HEARTS)) {
+        range = { min: 0, max: 15 };
+      } else if (ownFirst && ownFirst.strain === strain) {
         range = level <= ownFirst.level + 1 ? { min: 6, max: 10 } : { min: 10, max: 12 };
       } else if (level >= 2) {
         range = { min: 10, max: 17 };

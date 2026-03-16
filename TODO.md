@@ -628,3 +628,191 @@ the doubler has 0-1 cards in partner's suit (poor fit), encouraging the
 pull to the long suit.
 
 **Files:** `run-audit.mjs`, `src/engine/audit.js`, `src/engine/competitive.js`, `src/engine/rebid.js`
+
+---
+
+## Audit Fix: Forcing-After-Double & Responding Shape Adjustments
+
+100-deal spot-check audit identified several engine bugs. Quick fixes applied
+in-place; remaining larger issues deferred to their own steps below.
+
+### Fixed (quick fixes)
+
+**A. Runaway bidding spiral — doubles relieve forcing obligations**
+When an opponent (or partner) doubled during a forcing sequence, the engine
+still treated Pass as illegal (FORCING_PASS_COST = 15), causing the losing
+side to keep bidding up the line (5♣→5♦→5♥→5♠→5NT→...). In standard bridge,
+a double relieves forcing obligations — the partnership can pass for penalty.
+
+- [x] `contest.js` `detectContestForcing()`: return false when any double
+  occurs after partner's last contract bid
+- [x] `rebid.js` `contDetectForcing()`: same fix, plus restructured so the
+  cue-bid early-return (`oppSuits.has(partnerLast.strain)`) runs *after* the
+  double-relief check, not before
+- [x] `advisor.js` cue-bid overlay (responding phase): guard with
+  `hasDoubleAfterPartnerBid()` so the forcing penalty doesn't apply after
+  an intervening double
+- [x] `context.js`: added `hasDoubleAfterPartnerBid()` shared utility
+
+**B. 1NT responder passes with Stayman-eligible shape (7 HCP + singleton)**
+A hand with 7 HCP, singleton, and two 4-card majors would pass partner's
+1NT because STAYMAN_MIN_HCP = 8. In SAYC, distributional values compensate.
+
+- [x] `responding.js` `scoreStayman()`: treat hands with singleton/void as
+  effectively 1 HCP stronger for the Stayman threshold check
+- [x] `responding.js` `scoreNTPass()`: penalize pass when hand has
+  singleton/void + 4-card major + 7+ HCP (should explore with Stayman)
+
+**C. 1NT tiebreak: 1NT response chosen over 2-level new suit with singleton
+in partner's suit**
+With 10 HCP, singleton in partner's suit, and a 5-card side suit, the engine
+gave 1NT and 2♦ (new suit forcing) equal priority, defaulting to 1NT.
+
+- [x] `responding.js` `scoreResp1NT()`: penalize 1NT when responder has
+  singleton in partner's suit + biddable 5-card suit at the 2-level + 10+
+  HCP
+- [x] Added `hasSuitAt2()` helper (complement to existing `hasSuitAt1()`)
+
+**Files:** `src/engine/contest.js`, `src/engine/rebid.js`, `src/engine/advisor.js`, `src/engine/context.js`, `src/engine/responding.js`
+
+---
+
+## Step 21: Transfer Context Tracking After Competitive Disruption
+
+When partner makes a Jacoby Transfer over 1NT (e.g. 2♦ showing hearts) and
+opponents interfere, the engine already handles the *immediate* response
+correctly via `scoreAfterTransferWithInterference`. But when the auction
+continues further into a competitive phase (multiple rounds of bidding after
+the transfer), the engine still treats the opener's next bid as a transfer
+completion — applying "Must complete transfer to ♠" penalties even when the
+transfer context was abandoned rounds ago.
+
+**Root cause:** `score1NTRebid` in `rebid.js` uses partner's *original* bid
+(the transfer) to determine the scoring function for *all* subsequent rebids,
+regardless of how many rounds have elapsed. After competitive bidding disrupts
+the transfer, the opener should exit the transfer context and use normal
+continuation logic instead.
+
+Tasks:
+- [x] Detect when the transfer sequence has been disrupted: if opponents made
+  a contract bid after the transfer bid AND opener didn't immediately complete
+  the transfer on their first rebid, the transfer context is dead
+- [x] When transfer context is dead, route to `getContinuationBids` or
+  `getContestBids` instead of `score1NTRebid`
+- [x] Ensure the transition preserves knowledge of opener's 1NT range (15-17
+  HCP balanced) even when leaving the transfer path
+- [x] Add test cases: transfer disrupted at 2-level, 3-level, and 4-level
+  interference to verify correct context switching
+
+**Files:** `src/engine/rebid.js`, `src/engine/advisor.js`, `src/engine/context.js`
+
+---
+
+## Step 22: Opener Rebid Strength Tracking in Competitive Auctions
+
+When an opener shows extras through competitive actions (e.g. reopening
+doubles, free bids over interference), the rebid engine doesn't accumulate
+this information. An opener with 18 HCP who has already doubled twice for
+penalty (showing strength) still makes only an invitational raise (3♥) when
+partner advances, instead of bidding game (4♥).
+
+**Root cause:** The rebid and continuation modules estimate partner's range
+from their single bid but don't track the *opener's* accumulated strength
+signals. Multiple penalty doubles in a competitive auction demonstrate a hand
+well above minimum opening values, yet the engine treats the subsequent raise
+as if coming from a 13-15 HCP opener.
+
+Tasks:
+- [x] Track opener's "shown strength" through the auction: each competitive
+  action (free bid over interference, reopening double, penalty double) raises
+  the floor of opener's known range
+- [x] In `getRebidBids` and `getContinuationBids`: when computing expected
+  contract level, use opener's accumulated floor (not just HCP from the hand)
+  to determine whether to invite or bid game
+- [x] When opener has shown 17+ through competitive actions and partner
+  advances at the 2- or 3-level, game (not invite) should be the default
+  raise target
+- [x] Consider adding a `seatStrengthFloor(auction, seat)` utility to
+  `context.js` that returns the minimum HCP a seat has promised based on all
+  their bids so far
+
+**Files:** `src/engine/rebid.js`, `src/engine/context.js`, `src/engine/advisor.js`
+
+---
+
+## Step 23: Underbid Fixes (from 1000-Deal Audit)
+
+Running `analyze-underbids.mjs` over 1000 deals found ~38 underbids. ~66% are
+false positives (evenly-split HCP where no one can open — a system limitation,
+not an engine bug). ~13% are competitive disruptions that should be tagged
+INTERFERENCE. The remaining ~21% (7-8 per 1000 deals) are genuine engine
+issues, clustering around three patterns.
+
+### 23a: Opener passes forcing/invitational 3-level sequence
+
+After 1♦–2♣–2♦–3♣, opener passes with 12-13 HCP. Responder's 2♣ showed 10+
+HCP (new suit at the 2-level, forcing one round). After opener's minimum rebid,
+responder's 3♣ is a second new-suit bid at the 3-level — this sequence is
+forcing, yet the continuation module lets opener pass. With combined minimum
+~22-23, 3NT should be reachable.
+
+Tasks:
+- [x] In `contDetectForcing` / `getContinuationBids`: when responder bid a
+  new suit at the 2-level (forcing) and then rebids their suit or bids another
+  suit at the 3-level, treat the sequence as forcing — penalize pass
+- [x] When opener has 12+ HCP and responder has shown 10+ (via 2-level new
+  suit), combined minimum is 22 — passing at 3♣ should be heavily penalized
+  if 3NT is available
+
+### 23b: Responder doesn't invite over partner's 1NT
+
+When partner opens 1NT (15-17), responder with 7-8 HCP passes outright. With
+8 HCP the combined minimum is 23 (invitational territory), and standard SAYC
+calls for a 2NT invitation. Even 7 HCP is borderline, especially with a
+5-card suit or distributional features.
+
+Tasks:
+- [x] In `scoreNTPass` (responding.js): with 8-9 HCP opposite 1NT, penalize
+  pass more aggressively — this hand should invite via 2NT (or transfer then
+  invite with a 5-card major)
+- [x] Review the 7 HCP threshold — consider penalizing pass with 7 HCP when
+  hand has a 5-card suit or short-suit distribution (singleton/void)
+
+### 23c: Strong hand opposite partner's preempt can't find correct strain
+
+When a strong hand (15+ HCP) faces partner's weak two or 3-level preempt,
+the engine often lands in the wrong strain or stops short:
+- ♠AKQJ752 opposite partner's weak 2♦: engine tries 2NT feature ask, lands
+  in 4♦ instead of 4♠. Can't introduce a self-sufficient 7-card spade suit
+- 22 HCP opposite partner's 3♥ preempt: bids 4♣ (new suit, should be
+  forcing), but partner passes — 4♣ not treated as forcing over preempt
+- 18 HCP opens 1♠, partner raises to 2♠ (6 HCP, 3+ support), opener rebids
+  2NT instead of 4♠. With an 8-card fit and 24+ combined, should bid game
+
+Tasks:
+- [x] In weak-two response logic: when responder has a self-sufficient suit
+  (7+ cards with 3+ of top 5 honors), prefer bidding that suit directly over
+  the 2NT feature ask — the hand wants to declare in its own suit, not
+  partner's
+- [x] After a 3-level preempt, treat a new suit by the non-preemptor as
+  forcing — preemptor should not pass (preemptor has described their hand;
+  new-suit bids are asking, not signing off)
+- [x] In opener's rebid after a single raise (1♠–2♠): with 18+ HCP and a
+  known 8-card fit, bid 4M directly instead of 2NT. The fit + strength
+  guarantee game
+
+### 23d: Tighten audit false-positive threshold
+
+Most "underbid" flags on passed-out deals are not engine bugs — they're hands
+where no individual player has opening strength despite 20+ combined effective
+points. The audit should filter these out.
+
+Tasks:
+- [x] In `computeVerdict` (audit.js): for passed-out deals, only flag as
+  UNDERBID if at least one player on the stronger side has 12+ HCP (opening
+  strength). If the strongest individual hand is below 12, tag as REASONABLE
+  instead
+- [x] For competitive/preempt underbids where the weaker side disrupted the
+  auction, consider tagging as INTERFERENCE instead of UNDERBID
+
+**Files:** `src/engine/rebid.js`, `src/engine/responding.js`, `src/engine/audit.js`, `src/engine/context.js`

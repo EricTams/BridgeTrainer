@@ -1,6 +1,6 @@
 import { pass, contractBid, Strain, STRAIN_ORDER, lastContractBid, isLegalBid } from '../model/bid.js';
 import { evaluate } from './evaluate.js';
-import { classifyAuction, findPartnerBid, findPartnerLastBid, findOwnBid, findOpponentBid, hasOpponentBids, countOwnBids, isOpener, hasPlayerDoubled, hasPartnerDoubled, opponentsOutbidPartnership, opponentStrains } from './context.js';
+import { classifyAuction, findPartnerBid, findPartnerLastBid, findOwnBid, findOpponentBid, hasOpponentBids, countOwnBids, isOpener, hasPlayerDoubled, hasPartnerDoubled, opponentsOutbidPartnership, opponentStrains, hasDoubleAfterPartnerBid, isTransferContextDead } from './context.js';
 import { getOpeningBids } from './opening.js';
 import { getRespondingBids } from './responding.js';
 import { getRebidBids, getContinuationBids, getResponderRebidBids } from './rebid.js';
@@ -59,7 +59,8 @@ export function getRecommendations(hand, auction, seat) {
       if (partnerLast &&
           (partnerLast.level !== partnerBid.level || partnerLast.strain !== partnerBid.strain)) {
         const oppSuits = opponentStrains(auction, seat);
-        if (partnerLast.strain !== Strain.NOTRUMP && oppSuits.has(partnerLast.strain)) {
+        if (!hasDoubleAfterPartnerBid(auction, seat) &&
+            partnerLast.strain !== Strain.NOTRUMP && oppSuits.has(partnerLast.strain)) {
           results = results.map(rec => {
             if (rec.bid.type === 'pass') {
               return { ...rec, priority: Math.min(rec.priority, -5),
@@ -112,6 +113,10 @@ export function getRecommendations(hand, auction, seat) {
           results = getCompetitiveBids(hand, eval_, auction, seat);
           break;
         }
+        results = getContinuationBids(hand, eval_, auction, seat);
+        break;
+      }
+      if (isTransferContextDead(auction, seat)) {
         results = getContinuationBids(hand, eval_, auction, seat);
         break;
       }

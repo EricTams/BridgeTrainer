@@ -60,7 +60,7 @@ for (const [tag, count] of sortedVerdicts) {
 }
 console.log('');
 
-const goodTags = ['GOOD', 'EXCELLENT', 'REASONABLE', 'ACCEPTABLE', 'PREEMPT'];
+const goodTags = ['GOOD', 'EXCELLENT', 'REASONABLE', 'ACCEPTABLE', 'PREEMPT', 'INTERFERENCE'];
 const goodCount = sortedVerdicts
   .filter(([tag]) => goodTags.includes(tag))
   .reduce((sum, [, c]) => sum + c, 0);

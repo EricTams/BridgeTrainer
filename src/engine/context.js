@@ -299,6 +299,32 @@ export function hasPlayerDoubled(auction, seat) {
 }
 
 /**
+ * Check if any double occurred after partner's last contract bid.
+ * A double relieves forcing obligations — the partnership can pass
+ * for penalty instead of being compelled to bid.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {boolean}
+ */
+export function hasDoubleAfterPartnerBid(auction, seat) {
+  const partner = PARTNER_SEAT[seat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  let partnerBidIdx = -1;
+  for (let i = auction.bids.length - 1; i >= 0; i--) {
+    const bidSeat = SEATS[(dealerIdx + i) % SEATS.length];
+    if (bidSeat === partner && auction.bids[i].type === 'contract') {
+      partnerBidIdx = i;
+      break;
+    }
+  }
+  if (partnerBidIdx === -1) return false;
+  for (let i = partnerBidIdx + 1; i < auction.bids.length; i++) {
+    if (auction.bids[i].type === 'double') return true;
+  }
+  return false;
+}
+
+/**
  * Check whether any opponent made a contract bid after partner's
  * last contract bid. Used to detect interference in forcing sequences.
  * @param {Auction} auction
@@ -425,6 +451,121 @@ export function findLastDoubledBid(auction, seat) {
     }
   }
   return null;
+}
+
+/**
+ * Detect when a Jacoby Transfer sequence after 1NT has been disrupted
+ * beyond recovery. Returns true when all of:
+ *   1. The given seat opened 1NT
+ *   2. Partner responded with 2♦ or 2♥ (Jacoby transfer)
+ *   3. An opponent made a contract bid after the transfer
+ *   4. The opener did NOT complete the transfer on their next turn
+ *
+ * When true, the engine should exit the transfer scoring path and use
+ * normal continuation logic instead.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {boolean}
+ */
+export function isTransferContextDead(auction, seat) {
+  const partner = PARTNER_SEAT[seat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+
+  const myBid = findOwnBid(auction, seat);
+  if (!myBid || myBid.level !== 1 || myBid.strain !== Strain.NOTRUMP) return false;
+  if (!isOpener(auction, seat)) return false;
+
+  const partnerBid = findPartnerBid(auction, seat);
+  if (!partnerBid || partnerBid.level !== 2) return false;
+  if (partnerBid.strain !== Strain.DIAMONDS && partnerBid.strain !== Strain.HEARTS) return false;
+
+  const transferTarget = partnerBid.strain === Strain.DIAMONDS
+    ? Strain.HEARTS : Strain.SPADES;
+
+  let transferIdx = -1;
+  for (let i = 0; i < auction.bids.length; i++) {
+    const s = SEATS[(dealerIdx + i) % SEATS.length];
+    if (s === partner && auction.bids[i].type === 'contract') {
+      transferIdx = i;
+      break;
+    }
+  }
+  if (transferIdx === -1) return false;
+
+  let hasInterference = false;
+  for (let i = transferIdx + 1; i < auction.bids.length; i++) {
+    const s = SEATS[(dealerIdx + i) % SEATS.length];
+    if (s !== seat && s !== partner && auction.bids[i].type === 'contract') {
+      hasInterference = true;
+      break;
+    }
+  }
+  if (!hasInterference) return false;
+
+  for (let i = transferIdx + 1; i < auction.bids.length; i++) {
+    const s = SEATS[(dealerIdx + i) % SEATS.length];
+    if (s === seat) {
+      const bid = auction.bids[i];
+      if (bid.type === 'contract') {
+        const cb = /** @type {import('../model/bid.js').ContractBid} */ (bid);
+        if (cb.strain === transferTarget) return false;
+      }
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Compute the minimum HCP a seat has promised based on all their
+ * bids and competitive actions in the auction. Each strength-showing
+ * action after the initial bid (penalty/cooperative double, free bid
+ * over interference) raises the floor beyond what the first bid promised.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {number}
+ */
+export function seatStrengthFloor(auction, seat) {
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  const partner = PARTNER_SEAT[seat];
+
+  const firstBid = findOwnBid(auction, seat);
+  if (!firstBid) return 0;
+
+  const opened = isOpener(auction, seat);
+  let floor = bidMinHcp(firstBid, opened);
+
+  let passedFirstBid = false;
+  for (let i = 0; i < auction.bids.length; i++) {
+    const bidSeat = SEATS[(dealerIdx + i) % SEATS.length];
+    if (bidSeat !== seat) continue;
+
+    const bid = auction.bids[i];
+    if (!passedFirstBid) {
+      if (bid.type === 'contract') passedFirstBid = true;
+      continue;
+    }
+
+    if (bid.type === 'double') {
+      floor += 2;
+    }
+
+    if (bid.type === 'contract') {
+      let hasOppBetween = false;
+      for (let j = i - 1; j >= 0; j--) {
+        const jSeat = SEATS[(dealerIdx + j) % SEATS.length];
+        if (jSeat === seat) break;
+        if (jSeat !== seat && jSeat !== partner && auction.bids[j].type === 'contract') {
+          hasOppBetween = true;
+          break;
+        }
+      }
+      if (hasOppBetween) floor += 2;
+    }
+  }
+
+  return floor;
 }
 
 /**

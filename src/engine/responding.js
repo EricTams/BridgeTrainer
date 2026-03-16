@@ -1,4 +1,5 @@
 import { contractBid, pass, Strain, STRAIN_ORDER, STRAIN_SYMBOLS } from '../model/bid.js';
+import { Rank } from '../model/card.js';
 import { pen, penTotal } from './penalty.js';
 
 /**
@@ -116,12 +117,12 @@ const STRAIN_DISPLAY = {
 /**
  * Score every plausible responding bid when partner opened 1 of a suit.
  * Returns all scored bids sorted best-first (scores may be negative).
- * @param {Hand} _hand
+ * @param {Hand} hand
  * @param {Evaluation} evaluation
  * @param {ContractBid} partnerBid
  * @returns {BidRecommendation[]}
  */
-export function getRespondingBids(_hand, evaluation, partnerBid) {
+export function getRespondingBids(hand, evaluation, partnerBid) {
   if (partnerBid.level === 2 && partnerBid.strain === Strain.CLUBS) {
     return get2CResponseBids(evaluation);
   }
@@ -129,7 +130,7 @@ export function getRespondingBids(_hand, evaluation, partnerBid) {
     return get2NTResponseBids(evaluation);
   }
   if (partnerBid.level === 2 && partnerBid.strain !== Strain.NOTRUMP) {
-    return getWeakTwoResponseBids(evaluation, partnerBid.strain);
+    return getWeakTwoResponseBids(hand, evaluation, partnerBid.strain);
   }
   if (partnerBid.level >= 3 && partnerBid.strain !== Strain.NOTRUMP) {
     return getPreempt3ResponseBids(evaluation, partnerBid);
@@ -349,12 +350,16 @@ function limitRaiseExpl(hcp, support, ps) {
  */
 function scoreResp1NT(bid, eval_, ps) {
   const { hcp, shape } = eval_;
+  const partnerSupport = suitLen(shape, ps);
 
   /** @type {PenaltyItem[]} */
   const p = [];
   pen(p, `${hcp} HCP, need ${RESP_1NT_MIN}-${RESP_1NT_MAX}`, hcpDev(hcp, RESP_1NT_MIN, RESP_1NT_MAX) * HCP_COST);
   if (hasSuitAt1(shape, ps)) pen(p, 'Suit available at 1-level', SUIT_AVAIL_1NT_COST);
-  if (suitLen(shape, ps) >= RAISE_MIN_SUPPORT) pen(p, 'Fit available, prefer raise', FIT_AVAIL_1NT_COST);
+  if (partnerSupport >= RAISE_MIN_SUPPORT) pen(p, 'Fit available, prefer raise', FIT_AVAIL_1NT_COST);
+  if (partnerSupport <= 1 && hcp >= NEW_SUIT_2_MIN_HCP && hasSuitAt2(shape, ps)) {
+    pen(p, 'Singleton in partner\'s suit with biddable side suit', 3);
+  }
 
   return scored(bid, deduct(penTotal(p)), resp1NTExpl(hcp, shape, ps), p);
 }
@@ -366,6 +371,9 @@ function resp1NTExpl(hcp, shape, ps) {
   if (hasSuitAt1(shape, ps)) return 'Have a suit to bid at 1-level; prefer showing it';
   if (suitLen(shape, ps) >= RAISE_MIN_SUPPORT) {
     return `Have ${suitLen(shape, ps)} ${STRAIN_DISPLAY[ps]}: prefer raising partner`;
+  }
+  if (suitLen(shape, ps) <= 1 && hcp >= NEW_SUIT_2_MIN_HCP && hasSuitAt2(shape, ps)) {
+    return 'Singleton in partner\'s suit: prefer new suit at 2-level';
   }
   return `${hcp} HCP, no fit or new suit: 1NT response`;
 }
@@ -564,17 +572,32 @@ function scoreNTResponse(bid, eval_) {
 function scoreNTPass(bid, eval_) {
   const { hcp, shape } = eval_;
   const longMajor = Math.max(suitLen(shape, Strain.HEARTS), suitLen(shape, Strain.SPADES));
+  const longSuit = Math.max(...shape);
+  const shortSuit = Math.min(...shape);
+  const hasMajor = suitLen(shape, Strain.HEARTS) >= STAYMAN_MAJOR_LEN ||
+                   suitLen(shape, Strain.SPADES) >= STAYMAN_MAJOR_LEN;
   /** @type {PenaltyItem[]} */
   const p = [];
-  pen(p, `${hcp} HCP, max ${NT_RESP_PASS_MAX} to pass`, Math.max(0, hcp - NT_RESP_PASS_MAX) * HCP_COST);
+  const ntPassHcpCost = 3;
+  pen(p, `${hcp} HCP, max ${NT_RESP_PASS_MAX} to pass`, Math.max(0, hcp - NT_RESP_PASS_MAX) * ntPassHcpCost);
   if (longMajor >= NT_TRANSFER_MIN_LEN) pen(p, `${longMajor}-card major (transfer available)`, LONG_MAJOR_PASS_COST);
-  return scored(bid, deduct(penTotal(p)), ntPassExpl(hcp, longMajor), p);
+  if (shortSuit <= 1 && hasMajor && hcp >= NT_RESP_PASS_MAX) {
+    pen(p, 'Singleton/void with 4-card major: Stayman or transfer preferred', 3);
+  }
+  if (hcp === 7 && shortSuit <= 1) {
+    pen(p, 'Distributional shape (singleton/void) adds value at 7 HCP', 2);
+  }
+  if (hcp === 7 && longSuit >= 5) {
+    pen(p, '5-card suit adds value at 7 HCP', 1.5);
+  }
+  return scored(bid, deduct(penTotal(p)), ntPassExpl(hcp, longMajor, shortSuit, hasMajor), p);
 }
 
-/** @param {number} hcp @param {number} longMajor */
-function ntPassExpl(hcp, longMajor) {
+/** @param {number} hcp @param {number} longMajor @param {number} shortSuit @param {boolean} hasMajor */
+function ntPassExpl(hcp, longMajor, shortSuit, hasMajor) {
   if (hcp > NT_RESP_PASS_MAX) return `${hcp} HCP: too strong to pass (${NT_RESP_PASS_MAX} max)`;
   if (longMajor >= NT_TRANSFER_MIN_LEN) return `${longMajor}-card major: transfer for a better partscore`;
+  if (shortSuit <= 1 && hasMajor && hcp >= NT_RESP_PASS_MAX) return `${hcp} HCP with shortness: explore with Stayman/transfer`;
   return `${hcp} HCP: correct to pass partner's 1NT`;
 }
 
@@ -586,9 +609,11 @@ function scoreStayman(bid, eval_) {
   const spades = suitLen(shape, Strain.SPADES);
   const hearts = suitLen(shape, Strain.HEARTS);
   const longestMajor = Math.max(spades, hearts);
+  const shortSuit = Math.min(...shape);
+  const effHcp = shortSuit <= 1 ? hcp + 1 : hcp;
   /** @type {PenaltyItem[]} */
   const p = [];
-  pen(p, `${hcp} HCP, need ${STAYMAN_MIN_HCP}+`, Math.max(0, STAYMAN_MIN_HCP - hcp) * HCP_COST);
+  pen(p, `${hcp} HCP, need ${STAYMAN_MIN_HCP}+`, Math.max(0, STAYMAN_MIN_HCP - effHcp) * HCP_COST);
   if (longestMajor < STAYMAN_MAJOR_LEN) pen(p, 'No 4-card major for Stayman', NO_MAJOR_STAYMAN_COST);
   if (spades >= NT_TRANSFER_MIN_LEN && hearts < STAYMAN_MAJOR_LEN) pen(p, '5+ spades: prefer transfer', PREFER_TRANSFER_COST);
   if (hearts >= NT_TRANSFER_MIN_LEN && spades < STAYMAN_MAJOR_LEN) pen(p, '5+ hearts: prefer transfer', PREFER_TRANSFER_COST);
@@ -1281,16 +1306,17 @@ function scoreGeneric2CResponse(bid, eval_) {
 
 /**
  * Score every plausible response when partner opened a weak two.
+ * @param {Hand} hand
  * @param {Evaluation} eval_
  * @param {import('../model/bid.js').Strain} ps - partner's suit
  * @returns {BidRecommendation[]}
  */
-function getWeakTwoResponseBids(eval_, ps) {
+function getWeakTwoResponseBids(hand, eval_, ps) {
   const candidates = weakTwoResponseCandidates(ps);
   /** @type {BidRecommendation[]} */
   const results = [];
   for (const bid of candidates) {
-    results.push(scoreWeakTwoResponse(bid, eval_, ps));
+    results.push(scoreWeakTwoResponse(bid, hand, eval_, ps));
   }
   return results.sort((a, b) => b.priority - a.priority);
 }
@@ -1309,20 +1335,22 @@ function weakTwoResponseCandidates(ps) {
 
 /**
  * @param {import('../model/bid.js').Bid} bid
+ * @param {Hand} hand
  * @param {Evaluation} eval_
  * @param {import('../model/bid.js').Strain} ps
  * @returns {BidRecommendation}
  */
-function scoreWeakTwoResponse(bid, eval_, ps) {
+function scoreWeakTwoResponse(bid, hand, eval_, ps) {
   if (bid.type === 'pass') return scoreWTPass(bid, eval_, ps);
   if (bid.type !== 'contract') return scored(bid, 0, '');
   const { level, strain } = bid;
-  if (level === 2 && strain === Strain.NOTRUMP) return scoreWT2NT(bid, eval_, ps);
-  if (level === 2) return scoreWTNewSuit(bid, eval_, ps);
+  if (level === 2 && strain === Strain.NOTRUMP) return scoreWT2NT(bid, hand, eval_, ps);
+  if (level === 2) return scoreWTNewSuit(bid, hand, eval_, ps);
   if (level === 3 && strain === ps) return scoreWTSimpleRaise(bid, eval_, ps);
   if (level === 3 && strain === Strain.NOTRUMP) return scoreWT3NT(bid, eval_, ps);
-  if (level === 3) return scoreWTNewSuit(bid, eval_, ps);
+  if (level === 3) return scoreWTNewSuit(bid, hand, eval_, ps);
   if (level === 4 && strain === ps && isMajor(ps)) return scoreWTGameRaise(bid, eval_, ps);
+  if (level >= 4 && strain !== ps && strain !== Strain.NOTRUMP) return scoreWTNewSuit(bid, hand, eval_, ps);
   return scoreGenericWTResponse(bid, eval_, ps);
 }
 
@@ -1355,8 +1383,8 @@ function scoreWTPass(bid, eval_, ps) {
 
 // ── Weak Two: 2NT Feature Ask (14-16 HCP, game interest) ────────────
 
-/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} ps */
-function scoreWT2NT(bid, eval_, ps) {
+/** @param {import('../model/bid.js').Bid} bid @param {Hand} hand @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} ps */
+function scoreWT2NT(bid, hand, eval_, ps) {
   const { hcp, shape } = eval_;
   const support = suitLen(shape, ps);
   const name = STRAIN_DISPLAY[ps];
@@ -1367,9 +1395,15 @@ function scoreWT2NT(bid, eval_, ps) {
   if (support >= WT_RAISE_SUPPORT + 2) {
     pen(p, `${support} ${name}: fit is clear, prefer raising`, WT_LONG_SUPPORT_2NT_COST);
   }
+  const ssStrain = findSelfSufficientSuit(hand, ps);
+  if (ssStrain) {
+    pen(p, `Self-sufficient ${STRAIN_DISPLAY[ssStrain]} suit: bid it directly`, 5);
+  }
 
   let expl;
-  if (hcp >= WT_2NT_MIN && hcp <= WT_2NT_MAX) {
+  if (ssStrain) {
+    expl = `Have self-sufficient ${STRAIN_DISPLAY[ssStrain]}: prefer bidding own suit`;
+  } else if (hcp >= WT_2NT_MIN && hcp <= WT_2NT_MAX) {
     expl = `${hcp} HCP: 2NT feature ask (game interest)`;
   } else if (hcp < WT_2NT_MIN) {
     expl = `${hcp} HCP: need ${WT_2NT_MIN}+ for 2NT feature ask`;
@@ -1431,27 +1465,35 @@ function scoreWT3NT(bid, eval_, _ps) {
 
 // ── Weak Two: New Suit Forcing (16+ HCP, 5+ suit) ───────────────────
 
-/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} _ps */
-function scoreWTNewSuit(bid, eval_, _ps) {
+/** @param {import('../model/bid.js').Bid} bid @param {Hand} hand @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} _ps */
+function scoreWTNewSuit(bid, hand, eval_, _ps) {
   const { hcp, shape } = eval_;
   const { level, strain } = /** @type {ContractBid} */ (bid);
   const len = suitLen(shape, strain);
   const name = STRAIN_DISPLAY[strain];
   const sym = STRAIN_SYMBOLS[strain];
+  const selfSuff = isSelfSufficientSuit(hand, strain);
+  const minHcp = selfSuff ? 10 : WT_NEW_SUIT_MIN;
+  const minLen = selfSuff ? 7 : WT_NEW_SUIT_LEN;
   /** @type {PenaltyItem[]} */
   const p = [];
-  pen(p, `${hcp} HCP, need ${WT_NEW_SUIT_MIN}+`,
-    Math.max(0, WT_NEW_SUIT_MIN - hcp) * HCP_COST);
-  pen(p, `${len} ${name}, need ${WT_NEW_SUIT_LEN}+`,
-    Math.max(0, WT_NEW_SUIT_LEN - len) * LENGTH_SHORT_COST);
+  pen(p, `${hcp} HCP, need ${minHcp}+`,
+    Math.max(0, minHcp - hcp) * HCP_COST);
+  pen(p, `${len} ${name}, need ${minLen}+`,
+    Math.max(0, minLen - len) * LENGTH_SHORT_COST);
+  if (!selfSuff && level >= 4) {
+    pen(p, `Level ${level}: high for non-self-sufficient suit`, (level - 3) * 3);
+  }
 
   let expl;
-  if (hcp >= WT_NEW_SUIT_MIN && len >= WT_NEW_SUIT_LEN) {
+  if (selfSuff && hcp >= minHcp) {
+    expl = `${hcp} HCP with self-sufficient ${len} ${name}: ${level}${sym}`;
+  } else if (hcp >= minHcp && len >= minLen) {
     expl = `${hcp} HCP with ${len} ${name}: ${level}${sym} forcing`;
-  } else if (hcp < WT_NEW_SUIT_MIN) {
-    expl = `${hcp} HCP: need ${WT_NEW_SUIT_MIN}+ for forcing new suit`;
+  } else if (hcp < minHcp) {
+    expl = `${hcp} HCP: need ${minHcp}+ for new suit`;
   } else {
-    expl = `${len} ${name}: need ${WT_NEW_SUIT_LEN}+ for new suit`;
+    expl = `${len} ${name}: need ${minLen}+ for new suit`;
   }
   return scored(bid, deduct(penTotal(p)), expl, p);
 }
@@ -1518,6 +1560,35 @@ function scoreGenericWTResponse(bid, eval_, ps) {
     ? `${hcp} HCP: ${level}${sym} over weak two needs ${minHcp}+ HCP`
     : `${hcp} HCP: non-standard ${level}${sym} over weak two`;
   return scored(bid, deduct(penTotal(p)), expl, p);
+}
+
+// ── Self-sufficient suit detection ───────────────────────────────────
+
+/**
+ * Check if a suit is self-sufficient: 7+ cards with 3+ of the top 5 honors.
+ * @param {Hand} hand
+ * @param {import('../model/bid.js').Strain} strain
+ * @returns {boolean}
+ */
+function isSelfSufficientSuit(hand, strain) {
+  const cards = hand.cards.filter(c => c.suit === /** @type {any} */ (strain));
+  if (cards.length < 7) return false;
+  const topHonors = cards.filter(c => c.rank >= Rank.TEN).length;
+  return topHonors >= 3;
+}
+
+/**
+ * Find a self-sufficient suit (not partner's suit) if one exists.
+ * @param {Hand} hand
+ * @param {import('../model/bid.js').Strain} partnerStrain
+ * @returns {import('../model/bid.js').Strain | null}
+ */
+function findSelfSufficientSuit(hand, partnerStrain) {
+  for (const strain of SHAPE_STRAINS) {
+    if (strain === partnerStrain) continue;
+    if (isSelfSufficientSuit(hand, strain)) return strain;
+  }
+  return null;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -1588,6 +1659,17 @@ function hasSuitAt1(shape, partnerStrain) {
   for (const strain of SHAPE_STRAINS) {
     if (strain === partnerStrain) continue;
     if (ranksAbove(strain, partnerStrain) && suitLen(shape, strain) >= NEW_SUIT_MIN_LEN) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Does the hand have a 5+ card suit biddable at the 2-level (below partner's suit)? */
+function hasSuitAt2(shape, partnerStrain) {
+  for (const strain of SHAPE_STRAINS) {
+    if (strain === partnerStrain) continue;
+    if (!ranksAbove(strain, partnerStrain) && suitLen(shape, strain) >= 5) {
       return true;
     }
   }
