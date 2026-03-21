@@ -345,6 +345,9 @@ function scoreStaymanCont(bid, eval_, resp, hasFit, sp, he) {
   const p = [];
   const minHcp = 13 + (level - 2) * 3;
   pen(p, `${hcp} HCP, need ${minHcp}+`, Math.max(0, minHcp - hcp) * INSUFFICIENT_HCP_COST);
+  if (hasFit) {
+    pen(p, `Have major fit in ${STRAIN_DISPLAY[resp]}: raise instead of ${level}${sym}`, 5);
+  }
   return scored(bid, deduct(penTotal(p)),
     `${level}${sym}: non-standard Stayman continuation`, p);
 }

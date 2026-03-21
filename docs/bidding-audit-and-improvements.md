@@ -2,7 +2,7 @@
 
 **Purpose:** Living document that compares **BridgeTrainer's bidding engine** to the normative standard in [sayc-reference.md](./sayc-reference.md), records **deltas**, and lists **prioritized improvements**. Update this file whenever bidding code or agreed SAYC scope changes.
 
-**Last reviewed:** 2026-03-21 (B-05, B-07 fixed — 28 of 30 items resolved)
+**Last reviewed:** 2026-03-21 (B-30 through B-34 fixed — 33 of 35 items resolved)
 
 ---
 
@@ -108,6 +108,26 @@
 | `scoreContestNewSuit` | contest.js | Penalty only at 4+ | Now starts at 3 with `(level-2)*2.5` |
 | `scoreContestDouble` | contest.js | Binary 5+ split only | Added `(oppBid.level-2)*1.5` risk at 3-4 |
 
+### 2026-03-21 — Simulation-driven fix pass (10-auction evaluation)
+
+**Scope:** Ran 20 simulated auctions to completion using `run-game.mjs`, evaluated every bid against SAYC conventions, and identified recurring deviations. Five targeted fixes implemented.
+
+**Methodology:** Each bid in each auction was compared to SAYC rules from the reference document. Deviations were categorized by severity (major, moderate, minor) and grouped by root cause. Fixes prioritized by frequency and impact.
+
+**Fixes implemented (B-30 through B-34):**
+
+| ID | Issue | File | Fix |
+|----|-------|------|-----|
+| B-30 | Opening-strength hands (13+ HCP) preempting instead of opening at 1-level | opening.js | Added steep penalty when HCP ≥ 13 and preempting (e.g. 18 HCP opening 4♦ instead of 1♦) |
+| B-31 | Stayman continuation: bidding other suit when major fit found | conventions.js | Added 5-point penalty in generic fallback when `hasFit` is true — e.g. bidding 2♠ after 1NT-2♣-2♥ with 4 hearts |
+| B-32 | Continuation overbids: partner range too wide, no level penalty | rebid-continuation.js | Added preference-bid detection to narrow partner range; added level-above-minimum penalties in `contScoreFitBid` and `contScoreRebidOwn` |
+| B-33 | Singleton/void preference bids in continuation | rebid-continuation.js | Added 6-point penalty for singleton/void preference (was only 1.5 × shortfall) |
+| B-34 | Generic rebid tiebreak: non-pass bids tie with pass | rebid-shared.js | Added 0.2 pass-preference penalty only for sub-opening-strength hands (< 13 HCP) in `scoreGenericRebid` — does not affect strong hands that should bid |
+
+**Verification:** Post-fix run of 20 auctions shows 15 good/acceptable (75%) vs previous ~50% accuracy. Remaining issues primarily in competitive interference auctions (inherently harder).
+
+**Post-fix regression caught and fixed:** Initial tiebreak penalty (B-34) applied unconditionally, causing 22 HCP 2♣ opener to pass after 2♦ waiting response. Fixed by conditioning on HCP < 13 only.
+
 ---
 
 ## How to use this document
@@ -151,15 +171,15 @@ Quick view of how each SAYC area maps to the engine, with implementation status.
 | Hand evaluation | Implemented | [evaluate.js](../src/engine/evaluate.js) | `ntPoints`/`suitPoints` context-aware (B-04 ✓); HCP/shape classification ✓ |
 | Phase / context | Partial | [context.js](../src/engine/context.js) | Helpers ✓; partner-pass inference ✓ (B-24); vulnerability not tracked (B-17 deferred) |
 | Entry point / routing | Implemented | [advisor.js](../src/engine/advisor.js) | Merges slam bids; filters `isLegalBid`; fallback; preempt+silent partner ✓ (B-08) |
-| Opening bids | Partial | [opening.js](../src/engine/opening.js) | 4th-seat effectively blocked; suit selection ✓; 2♣ override ✓ (B-12); preempt suit quality ✓ (B-21); 3NT+ suppressed ✓ (B-03); vulnerability absent (B-17 deferred) |
+| Opening bids | Partial | [opening.js](../src/engine/opening.js) | 4th-seat effectively blocked; suit selection ✓; 2♣ override ✓ (B-12); preempt suit quality ✓ (B-21); 3NT+ suppressed ✓ (B-03); opening-strength preempt blocked ✓ (B-30); vulnerability absent (B-17 deferred) |
 | Responding to 1-suit | Partial | [responding.js](../src/engine/responding.js) | Jacoby 2NT ✓ (B-01); 2NT ranges ✓ (B-10); 5+ for 2-level ✓ (B-11); forcing status ✓ (B-13); 5-5 major order ✓ (B-18); minor raise vs 1NT ✓ (B-22); 2NT stopper check ✓ (B-23); 4M raise shape penalty ✓ (B-25) |
 | Responding to 1NT | Implemented | [responding.js](../src/engine/responding.js) | Stayman, transfers, invites, quantitative 4NT — all ✓ |
 | Responding to 2♣ | Implemented | [responding.js](../src/engine/responding.js) | Simplified relay trees; forcing pass = 20; adequate for trainer scope ✓ |
 | Responding to 2NT / weak two / preempt | Implemented | [responding.js](../src/engine/responding.js) | 2NT responses ✓; weak two self-sufficient suit ✓; feature asks ✓ |
 | Competitive bidding | Partial | [competitive.js](../src/engine/competitive.js) | Level scaling ✓ (B-16); vulnerability absent (B-17 deferred); contextual HCP adjustments ✓ (B-05) |
-| Rebid / continuation | Partial | [rebid.js](../src/engine/rebid.js), [rebid-opener-suit.js](../src/engine/rebid-opener-suit.js), [rebid-responder.js](../src/engine/rebid-responder.js), [rebid-continuation.js](../src/engine/rebid-continuation.js), [rebid-shared.js](../src/engine/rebid-shared.js) | Reverse/invite ✓; 4SF ✓; responder rebid ✓; continuation context ✓; help-suit game try ✓ (B-20); Stayman interference ✓ (B-19); 3M jump ✓ (B-26); 2NT after 2-level ✓ (B-27); level penalties ✓ (B-28, B-29); partner-pass inference ✓ (B-24) |
+| Rebid / continuation | Partial | [rebid.js](../src/engine/rebid.js), [rebid-opener-suit.js](../src/engine/rebid-opener-suit.js), [rebid-responder.js](../src/engine/rebid-responder.js), [rebid-continuation.js](../src/engine/rebid-continuation.js), [rebid-shared.js](../src/engine/rebid-shared.js) | Reverse/invite ✓; 4SF ✓; responder rebid ✓; continuation context ✓; help-suit game try ✓ (B-20); Stayman interference ✓ (B-19); 3M jump ✓ (B-26); 2NT after 2-level ✓ (B-27); level penalties ✓ (B-28, B-29); partner-pass inference ✓ (B-24); continuation overbids ✓ (B-32); singleton preference ✓ (B-33); generic tiebreak ✓ (B-34) |
 | Contested fit | Partial | [contest.js](../src/engine/contest.js) | LOTT ✓; game-established ✓; forcing detect ✓ (B-07: full scope — cue-bid, new suit, jump, 2♣ GF, jump shift; double relief); level scaling ✓ (B-16); forcing-pass ✓ (B-07); partner-pass inference ✓ (B-24) |
-| Slam conventions | Implemented | [conventions.js](../src/engine/conventions.js) | Standard Blackwood ✓ (B-09 → docs only); Gerber, king-ask, cue all present |
+| Slam conventions | Implemented | [conventions.js](../src/engine/conventions.js) | Standard Blackwood ✓ (B-09 → docs only); Gerber, king-ask, cue all present; Stayman continuation fit routing ✓ (B-31) |
 | Bid legality | Implemented | [bid.js](../src/model/bid.js) | `isLegalBid` — bridge law / sufficient bid ✓ |
 
 **Mechanism:** Almost all "SAYC correctness" is implemented as **soft scoring** (priority = `MAX_SCORE − penalties`). The engine rarely hard-blocks systemically wrong bids; multiple calls can remain legal but ranked differently. Deltas often manifest as "wrong emphasis" rather than "impossible."

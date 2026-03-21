@@ -175,6 +175,9 @@ export function scoreGenericRebid(bid, eval_) {
   const minHcp = MIN_MIN + (level - 1) * 3;
   /** @type {PenaltyItem[]} */ const p = [];
   pen(p, `${hcp} HCP, need ${minHcp}+`, Math.max(0, minHcp - hcp) * HCP_COST);
+  if (hcp < MIN_MIN) {
+    pen(p, 'Below opening values: prefer pass', 0.2);
+  }
   const sym = strain === Strain.NOTRUMP ? 'NT' : STRAIN_SYMBOLS[strain];
   return scored(bid, deduct(penTotal(p)), `${level}${sym}: non-standard rebid`, p);
 }

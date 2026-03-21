@@ -387,6 +387,10 @@ function scorePreempt(bid, hand, eval_, seatPos) {
   /** @type {PenaltyItem[]} */
   const p = [];
   pen(p, `${hcp} HCP, max ${hcpMax} for preempt`, Math.max(0, hcp - hcpMax) * HCP_COST);
+  if (hcp >= OPEN_1_MIN) {
+    pen(p, `${hcp} HCP: opening strength — open at the 1-level, not preempt`,
+      (hcp - OPEN_1_MIN + 1) * HCP_COST);
+  }
   const ideal = idealPreemptLevel(len);
   if (ideal === 0) {
     pen(p, `${len} ${name}, need ${PREEMPT_MIN_LENGTH}+`, (PREEMPT_MIN_LENGTH - len) * LENGTH_SHORT_COST);

@@ -382,6 +382,18 @@ function narrowByRebid(base, first, last, opened) {
     }
   }
 
+  // Responder returning to opener's first suit at the cheapest level (preference bid)
+  // signals minimum values — cap the top of range
+  if (!opened && first.strain !== Strain.NOTRUMP && last.strain !== first.strain) {
+    const firstIdx = STRAIN_ORDER.indexOf(first.strain);
+    const lastIdx = STRAIN_ORDER.indexOf(last.strain);
+    if (last.strain !== Strain.NOTRUMP &&
+        ((lastIdx > firstIdx && last.level === first.level) ||
+         (lastIdx <= firstIdx && last.level === first.level + 1))) {
+      return { min, max: Math.min(max, 10) };
+    }
+  }
+
   if (last.level >= first.level + 2 && last.strain === first.strain) {
     min = Math.max(min, min + 2);
   }
@@ -595,6 +607,9 @@ function contScoreFitBid(bid, eval_, fitStrain, combinedMin, combinedMax, partne
     pen(p, `Combined ${effMin}-${combinedMax}: should bid game`, 4);
   } else if (combinedMid >= CONT_COMBINED_GAME - 2) {
     pen(p, `Combined ${effMin}-${combinedMax}: close to game`, 2);
+  } else if (level >= 3 && combinedMid < CONT_COMBINED_GAME - 2) {
+    pen(p, `Combined ~${effMin}-${combinedMax}: below invitational at level ${level}`,
+      (level - 2) * 3);
   }
   const tag = combinedMid >= CONT_COMBINED_GAME - 2 ? 'invitational' : 'competitive';
   return scored(bid, deduct(penTotal(p)),
@@ -624,7 +639,9 @@ function contScorePreference(bid, eval_, strain, combinedMin, combinedMax, partn
   /** @type {PenaltyItem[]} */
   const p = [];
   pen(p, `${support} ${name}, need 2+`, Math.max(0, 2 - support) * LENGTH_SHORT_COST);
-  if (support < CONT_FIT_SUPPORT) {
+  if (support <= 1) {
+    pen(p, `Only ${support} ${name}: singleton/void preference is dangerous`, 6);
+  } else if (support < CONT_FIT_SUPPORT) {
     pen(p, `Only ${support} ${name}: thin preference`, (CONT_FIT_SUPPORT - support) * 1.5);
   }
   if (isGameLevel(/** @type {ContractBid} */ (bid)) && combinedMid < CONT_COMBINED_GAME) {
@@ -675,6 +692,10 @@ function contScoreRebidOwn(bid, eval_, combinedMin, combinedMax, partnershipFloo
   }
   if (!atGame && level < gameLevel && combinedMid >= CONT_COMBINED_GAME) {
     pen(p, `Combined ${effMin}-${combinedMax}: should bid game`, 3);
+  }
+  if (!atGame && level < gameLevel && combinedMid < CONT_COMBINED_GAME && level >= 3) {
+    pen(p, `Level ${level} without game values`,
+      (level - 2) * 2.5);
   }
   if (level > gameLevel) {
     if (combinedMid < CONT_COMBINED_SLAM) {
