@@ -280,8 +280,8 @@ Partner raised South's opening to the 2-level (showing 6-10 HCP). South
 decides: pass with minimum (13-16), invite with 17-18 (bid 3M), or bid
 game with 19+ (bid 4M). The 16-17 boundary is the trickiest.
 
-- **Engine support:** `rebid.js` `scoreAfterSingleRaise()` uses thresholds
-  `RAISE_PASS_MAX = 16`, `RAISE_INV_MIN = 17`, `RAISE_GAME_MIN = 19`.
+- **Engine support:** `rebid-opener-suit.js` `scoreAfterSingleRaise()` uses thresholds
+  `RAISE_PASS_MAX = 14`, `RAISE_INV_MIN = 15`, `RAISE_GAME_MIN = 18` (HCP-based, B-15 fixed).
 - **Generator:** Current rebid puzzle can produce this. Filter South for
   16-19 HCP.
 

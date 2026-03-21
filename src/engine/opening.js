@@ -36,6 +36,8 @@ const NT_PREF_COST = 3;           // balanced in 1NT range, opening a suit inste
 const NT_2_PREF_COST = 5;          // balanced in 2NT range, opening a suit instead
 const MAJOR_NT_DISCOUNT = 1.5;     // discount for 5+ major as alternative to 1NT
 const RULE_15_COST = 6;           // opening in 4th seat without Rule of 15
+const STRONG_2C_OVERRIDE_COST = 8; // 22+ HCP must open 2♣, not high NT (B-12)
+const NOT_STANDARD_SAYC_COST = 12; // 3NT+ openings not on minimal SAYC card (B-03)
 
 // ── SAYC thresholds ──────────────────────────────────────────────────
 
@@ -47,7 +49,7 @@ const OPEN_2NT_MAX = 21;
 const OPEN_1_MIN = 13;
 const OPEN_1_MAX = 21;
 const BORDERLINE_MIN = 11;
-const WEAK_TWO_MIN = 5;
+const WEAK_TWO_MIN = 6;
 const WEAK_TWO_MAX = 11;
 const PREEMPT_MAX_HCP = 10;
 const PASS_HCP_LIMIT = 12;
@@ -135,7 +137,7 @@ function scoreBid(bid, hand, eval_, seatPos) {
   if (level === 2 && strain === Strain.NOTRUMP) return score2NT(bid, eval_);
   if (level === 2) return scoreWeakTwo(bid, hand, eval_, seatPos);
   if (strain === Strain.NOTRUMP) return scoreHighNT(bid, eval_);
-  return scorePreempt(bid, eval_, seatPos);
+  return scorePreempt(bid, hand, eval_, seatPos);
 }
 
 // ── Generic penalty helpers ──────────────────────────────────────────
@@ -316,7 +318,7 @@ function scoreWeakTwo(bid, hand, eval_, seatPos) {
   const len = shape[idx];
   const name = STRAIN_DISPLAY[strain];
 
-  if (seatPos === 4) return scored(bid, 0, 'Weak twos not used in 4th seat');
+  if (seatPos === 4) return scored(bid, -5, 'Weak twos not used in 4th seat');
 
   /** @type {PenaltyItem[]} */
   const p = [];
@@ -353,42 +355,34 @@ function weakTwoExplanation(hcp, len, strain, penalty, sideMajorLen) {
 
 // ── High NT (3NT+ opening) ───────────────────────────────────────────
 
-/** HCP per level increment, derived from existing 1NT/2NT thresholds. */
-const NT_HCP_PER_LEVEL = OPEN_2NT_MIN - OPEN_1NT_MIN;
-const NT_HCP_RANGE = OPEN_1NT_MAX - OPEN_1NT_MIN;
-
 function scoreHighNT(bid, eval_) {
   const { hcp, shapeClass } = eval_;
   const { level } = bid;
-  const minHcp = OPEN_1NT_MIN + (level - 1) * NT_HCP_PER_LEVEL;
-  const maxHcp = minHcp + NT_HCP_RANGE;
 
   /** @type {PenaltyItem[]} */
   const p = [];
-  pen(p, `${hcp} HCP, need ${minHcp}-${maxHcp}`, hcpDev(hcp, minHcp, maxHcp) * HCP_COST);
+  pen(p, `${level}NT opening not standard SAYC — use 2♣ for strong hands`, NOT_STANDARD_SAYC_COST);
   pen(p, `${shapeClass} (need balanced)`, shapeCost(shapeClass));
-  return scored(bid, deduct(penTotal(p)), highNTExpl(hcp, shapeClass, level, minHcp, maxHcp), p);
+  if (hcp >= STRONG_2C_MIN) {
+    pen(p, `${hcp} HCP: must open 2♣ with ${STRONG_2C_MIN}+`, STRONG_2C_OVERRIDE_COST);
+  }
+  return scored(bid, deduct(penTotal(p)),
+    `${level}NT opening is not standard SAYC; open 2♣ with 22+ HCP`, p);
 }
 
-function highNTExpl(hcp, shapeClass, level, minHcp, maxHcp) {
-  if (shapeClass !== 'balanced') return `Not balanced for ${level}NT opening`;
-  const dev = hcpDev(hcp, minHcp, maxHcp);
-  if (dev === 0) return `${hcp} HCP, balanced: ${level}NT opening`;
-  const dir = hcp < minHcp ? 'below' : 'above';
-  return `${hcp} HCP: ${dev} ${dir} ${level}NT range (${minHcp}-${maxHcp})`;
-}
 
 // ── Preempt (suit bids at 3+ level) ─────────────────────────────────
 
-function scorePreempt(bid, eval_, seatPos) {
+function scorePreempt(bid, hand, eval_, seatPos) {
   const { hcp, shape } = eval_;
   const { level, strain } = bid;
   const len = shape[SHAPE_STRAINS.indexOf(strain)];
   const name = STRAIN_DISPLAY[strain];
 
-  if (seatPos === 4) return scored(bid, 0, 'Preempts not used in 4th seat');
+  if (seatPos === 4) return scored(bid, -5, 'Preempts not used in 4th seat');
 
   const hcpMax = len >= 8 ? PREEMPT_MAX_HCP + STRONG_PREEMPT_HCP_BONUS : PREEMPT_MAX_HCP;
+  const goodSuit = hasSuitQuality(hand, strain);
 
   /** @type {PenaltyItem[]} */
   const p = [];
@@ -400,7 +394,8 @@ function scorePreempt(bid, eval_, seatPos) {
   } else {
     pen(p, `Level ${level} vs ideal ${ideal}`, Math.abs(level - ideal) * PREEMPT_LEVEL_COST);
   }
-  return scored(bid, deduct(penTotal(p)), preemptExplanation(hcp, len, level, ideal, strain, hcpMax), p);
+  if (!goodSuit) pen(p, 'Poor suit quality', SUIT_QUALITY_COST);
+  return scored(bid, deduct(penTotal(p)), preemptExplanation(hcp, len, level, ideal, strain, hcpMax, goodSuit), p);
 }
 
 function idealPreemptLevel(suitLen) {
@@ -408,13 +403,16 @@ function idealPreemptLevel(suitLen) {
   return Math.min(suitLen - PREEMPT_LEVEL_OFFSET, MAX_PREEMPT_LEVEL);
 }
 
-function preemptExplanation(hcp, len, level, ideal, strain, hcpMax) {
+function preemptExplanation(hcp, len, level, ideal, strain, hcpMax, goodSuit) {
   const name = STRAIN_DISPLAY[strain];
   const sym = STRAIN_SYMBOLS[strain];
   if (ideal === 0) return `${len} ${name}: too short for ${level}${sym}`;
   if (level !== ideal) return `${len}-card ${name}: ${ideal}${sym} is more standard than ${level}${sym}`;
   if (hcp > hcpMax) {
     return `${hcp} HCP is too strong for a preempt ${level}${sym}`;
+  }
+  if (!goodSuit) {
+    return `${len}-card ${name} lacks honors: poor suit quality for ${level}${sym}`;
   }
   if (len >= 8 && hcp > PREEMPT_MAX_HCP) {
     return `${hcp} HCP with ${len}-card ${name}: strong ${level}${sym} opening`;

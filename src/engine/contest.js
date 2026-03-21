@@ -6,6 +6,7 @@ import {
   findOwnBid, findPartnerBid, findPartnerLastBid,
   findOpponentBid, isOpener, lastPartnershipContractBid,
   partnershipMinHcp, opponentStrains,
+  partnerPassCount,
 } from './context.js';
 
 /**
@@ -101,8 +102,17 @@ export function getContestBids(hand, eval_, auction, seat) {
 // ── Forcing detection ────────────────────────────────────────────────
 
 /**
- * Detect if partner's last bid was forcing and we haven't responded yet.
- * Covers: new suit by responder (forcing one round), 2♣ GF sequences.
+ * B-07: Detect if partner's last bid creates a forcing obligation in
+ * a contested auction. Covers the full set of SAYC forcing scenarios:
+ * - Partner cue-bid of opponent's suit (forcing)
+ * - Partner introduced a genuinely new suit (forcing one round)
+ * - Partner jumped in own suit (extras, forcing)
+ * - 2♣ game-forcing auction below game
+ * - Responder's jump shift (game-forcing)
+ *
+ * Doubles after a forcing bid relieve the obligation (either side's
+ * double — opponent's double lets us pass for penalty; our double is
+ * itself a competitive action satisfying the force).
  * @param {Auction} auction
  * @param {Seat} seat
  * @returns {boolean}
@@ -110,7 +120,10 @@ export function getContestBids(hand, eval_, auction, seat) {
 function detectContestForcing(auction, seat) {
   const partner = PARTNER_SEAT[seat];
   const partnerLast = findPartnerLastBid(auction, seat);
-  if (!partnerLast || partnerLast.strain === Strain.NOTRUMP) return false;
+  if (!partnerLast) return false;
+
+  // Game-level bids are never "forcing to bid more"
+  if (isGameLevel(partnerLast)) return false;
 
   const dealerIdx = SEATS.indexOf(auction.dealer);
 
@@ -124,21 +137,70 @@ function detectContestForcing(auction, seat) {
   }
   if (partnerLastIdx < 0) return false;
 
+  // If we already made a contract bid after partner's last bid, force resolved
   for (let i = partnerLastIdx + 1; i < auction.bids.length; i++) {
     const s = SEATS[(dealerIdx + i) % SEATS.length];
     if (s === seat && auction.bids[i].type === 'contract') return false;
   }
 
-  // An opponent's double relieves the forcing obligation — we can pass
-  // the double for penalty instead of being forced to bid.
+  // Any double after partner's forcing bid relieves the obligation:
+  // opponent's double → we can pass for penalty;
+  // our own double → we took competitive action, force satisfied
   for (let i = partnerLastIdx + 1; i < auction.bids.length; i++) {
     if (auction.bids[i].type === 'double') return false;
   }
 
+  const oppSuits = opponentStrains(auction, seat);
   const ownBid = findOwnBid(auction, seat);
-  if (!ownBid) return false;
 
-  if (partnerLast.strain !== ownBid.strain) return true;
+  // Partner bid opponent's suit = cue-bid (forcing)
+  if (partnerLast.strain !== Strain.NOTRUMP && oppSuits.has(partnerLast.strain)) {
+    return true;
+  }
+
+  // Check if partner's suit bid is genuinely new or a jump in their own suit
+  if (partnerLast.strain !== Strain.NOTRUMP) {
+    /** @type {Set<import('../model/bid.js').Strain>} */
+    const prevStrains = new Set();
+    /** @type {ContractBid | null} */
+    let partnerPrevInStrain = null;
+    for (let i = 0; i < partnerLastIdx; i++) {
+      const s = SEATS[(dealerIdx + i) % SEATS.length];
+      const b = auction.bids[i];
+      if ((s === seat || s === partner) && b.type === 'contract' && b.strain !== Strain.NOTRUMP) {
+        prevStrains.add(/** @type {ContractBid} */ (b).strain);
+        if (s === partner && /** @type {ContractBid} */ (b).strain === partnerLast.strain) {
+          partnerPrevInStrain = /** @type {ContractBid} */ (b);
+        }
+      }
+    }
+    // Partner introduced a genuinely new suit (not previously bid by either side)
+    if (!prevStrains.has(partnerLast.strain)) return true;
+
+    // Partner jumped 2+ levels in their own suit (showing extras)
+    if (partnerPrevInStrain && partnerLast.level >= partnerPrevInStrain.level + 2) {
+      return true;
+    }
+  }
+
+  // 2♣ GF auction: either side opened 2♣ and auction is still below game
+  const partnerFirst = findPartnerBid(auction, seat);
+  if (partnerFirst && partnerFirst.level === 2 && partnerFirst.strain === Strain.CLUBS &&
+      isOpener(auction, partner)) {
+    return true;
+  }
+  if (ownBid && ownBid.level === 2 && ownBid.strain === Strain.CLUBS &&
+      isOpener(auction, seat)) {
+    return true;
+  }
+
+  // Responder's jump shift at 3-level (game-forcing)
+  if (partnerFirst && partnerFirst.level >= 3 &&
+      partnerFirst.strain !== Strain.NOTRUMP &&
+      !isOpener(auction, partner)) {
+    // Check that it was a jump (partner could bid at a lower level)
+    if (partnerLast.level >= 3) return true;
+  }
 
   return false;
 }
@@ -232,9 +294,18 @@ function scoreContestPass(bid, eval_, oppBid, fitInfo, combinedMin, combinedMax,
     return scored(bid, deduct(penTotal(p)), 'Partner\'s bid is forcing: must bid', p);
   }
 
+  // B-07: Forcing pass after game reached — when partnership bid to game and
+  // opponents compete above, pass is a cooperative "forcing pass" that tells
+  // partner to double or bid on. With strong values, passing says "I want to
+  // penalize"; with a distributional hand, partner should bid.
   if (gameWasReached) {
-    pen(p, 'Partnership already reached game: don\'t let opponents steal',
-      GAME_ESTABLISHED_PASS_COST);
+    if (effMid >= COMBINED_GAME_MIN + 3) {
+      pen(p, 'Forcing pass: game values established, partner should double or bid on',
+        GAME_ESTABLISHED_PASS_COST + 2);
+    } else {
+      pen(p, 'Partnership already reached game: don\'t let opponents steal',
+        GAME_ESTABLISHED_PASS_COST);
+    }
   }
 
   if (fitInfo.strain && fitInfo.totalFit >= 8) {
@@ -269,7 +340,9 @@ function scoreContestPass(bid, eval_, oppBid, fitInfo, combinedMin, combinedMax,
   }
 
   let expl;
-  if (gameWasReached) {
+  if (gameWasReached && effMid >= COMBINED_GAME_MIN + 3) {
+    expl = `${hcp} HCP: forcing pass — partner should double or bid on`;
+  } else if (gameWasReached) {
     expl = `${hcp} HCP: must act — partnership already reached game`;
   } else if (penTotal(p) < 0.5) {
     expl = `${hcp} HCP: pass (opponents outbid us)`;
@@ -442,6 +515,17 @@ function scoreContestDouble(bid, hand, eval_, oppBid, fitInfo, combinedMin, comb
       pen(p, 'Low-level with fit: consider bidding rather than doubling',
         DBL_LOW_LEVEL_FIT_COST);
     }
+
+    if (oppBid.level >= 3) {
+      pen(p, `${oppBid.level}-level double: higher risk/reward`,
+        (oppBid.level - 2) * 1.5);
+    }
+  }
+
+  // B-07: In a forcing-pass situation, doubling is the cooperative
+  // alternative to bidding on — strongly preferred with trump tricks.
+  if (gameWasReached && oppBid.strain !== Strain.NOTRUMP && hasTrumpTricks(hand, oppBid.strain)) {
+    bonus += 2;
   }
 
   let expl;
@@ -523,8 +607,8 @@ function scoreContestNewSuit(bid, eval_, fitInfo) {
     pen(p, `Have ${STRAIN_DISPLAY[fitInfo.strain]} fit: prefer raising`, NEW_SUIT_WITH_FIT_COST);
   }
 
-  if (level >= 4) {
-    pen(p, `${level}-level new suit is risky`, (level - 3) * 3);
+  if (level >= 3) {
+    pen(p, `${level}-level new suit is risky`, (level - 2) * 2.5);
   }
 
   const expl = (len >= 5 && hcp >= 10)
@@ -679,33 +763,40 @@ function estimatePartnerRange(auction, seat) {
   const partnerOpened = isOpener(auction, partner);
   const { level, strain } = partnerBid;
 
+  /** @type {HcpRange} */
+  let range;
+
   if (partnerOpened) {
-    if (level === 1 && strain === Strain.NOTRUMP) return { min: 15, max: 17 };
-    if (level === 2 && strain === Strain.NOTRUMP) return { min: 20, max: 21 };
-    if (level === 2 && strain === Strain.CLUBS) return { min: 22, max: 37 };
-    if (level === 2) return { min: 5, max: 11 };
-    if (level >= 3) return { min: 5, max: 10 };
-    return { min: 13, max: 21 };
+    if (level === 1 && strain === Strain.NOTRUMP) range = { min: 15, max: 17 };
+    else if (level === 2 && strain === Strain.NOTRUMP) range = { min: 20, max: 21 };
+    else if (level === 2 && strain === Strain.CLUBS) range = { min: 22, max: 37 };
+    else if (level === 2) range = { min: 5, max: 11 };
+    else if (level >= 3) range = { min: 5, max: 10 };
+    else range = { min: 13, max: 21 };
+  } else if (didPartnerOvercall(auction, seat)) {
+    range = level >= 2 ? { min: 10, max: 16 } : { min: 8, max: 16 };
+  } else if (strain === Strain.NOTRUMP) {
+    if (level === 1) range = { min: 6, max: 10 };
+    else if (level === 2) range = { min: 13, max: 15 };
+    else range = { min: 13, max: 17 };
+  } else {
+    const myBid = findOwnBid(auction, seat);
+    if (myBid && myBid.strain === strain) {
+      range = level <= myBid.level + 1 ? { min: 6, max: 10 } : { min: 10, max: 12 };
+    } else if (level >= 2) {
+      range = { min: 10, max: 17 };
+    } else {
+      range = { min: 6, max: 17 };
+    }
   }
 
-  if (didPartnerOvercall(auction, seat)) {
-    return level >= 2 ? { min: 10, max: 16 } : { min: 8, max: 16 };
+  const passes = partnerPassCount(auction, seat);
+  if (passes > 0) {
+    const reduction = passes * 2;
+    range = { min: range.min, max: Math.max(range.min, range.max - reduction) };
   }
 
-  if (strain === Strain.NOTRUMP) {
-    if (level === 1) return { min: 6, max: 10 };
-    if (level === 2) return { min: 13, max: 15 };
-    return { min: 13, max: 17 };
-  }
-
-  const myBid = findOwnBid(auction, seat);
-  if (myBid && myBid.strain === strain) {
-    if (level <= myBid.level + 1) return { min: 6, max: 10 };
-    return { min: 10, max: 12 };
-  }
-
-  if (level >= 2) return { min: 10, max: 17 };
-  return { min: 6, max: 17 };
+  return range;
 }
 
 /**

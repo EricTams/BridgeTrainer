@@ -207,6 +207,118 @@ export function opponentStrains(auction, seat) {
 }
 
 /**
+ * True if this seat has played at least one Pass in the auction so far.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {boolean}
+ */
+export function seatHasPassed(auction, seat) {
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  for (let i = 0; i < auction.bids.length; i++) {
+    if (SEATS[(dealerIdx + i) % SEATS.length] === seat && auction.bids[i].type === 'pass') {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * True when the seat has passed but not yet made a contract bid — the same
+ * "passed hand" situation players use when deciding whether to reopen.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {boolean}
+ */
+export function reopeningWithoutOwnBid(auction, seat) {
+  return seatHasPassed(auction, seat) && findOwnBid(auction, seat) === null;
+}
+
+/**
+ * Count how many times partner passed when they had an opportunity to act
+ * competitively. Each such pass provides negative inference about partner's
+ * strength — a hand worth bidding would have entered the auction.
+ *
+ * Returns 0 when partner never passed over action, 1+ when they did.
+ * A passed-hand partner (never bid at all) scores at least 1.
+ * A partner who bid once but later passed over opponent action also scores.
+ * @param {Auction} auction
+ * @param {Seat} playerSeat
+ * @returns {number}
+ */
+export function partnerPassCount(auction, playerSeat) {
+  const partner = PARTNER_SEAT[playerSeat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  let count = 0;
+
+  for (let i = 0; i < auction.bids.length; i++) {
+    const bidSeat = SEATS[(dealerIdx + i) % SEATS.length];
+    if (bidSeat !== partner) continue;
+    if (auction.bids[i].type !== 'pass') continue;
+
+    let hadAction = false;
+    for (let j = i - 1; j >= 0; j--) {
+      const b = auction.bids[j];
+      if (b.type === 'contract' || b.type === 'double') {
+        hadAction = true;
+        break;
+      }
+    }
+    if (hadAction) count++;
+  }
+  return count;
+}
+
+/**
+ * True sandwich seat: the player has not yet bid, and *each* opponent has
+ * bid at least one real suit (not notrump), so the player is genuinely
+ * "sandwiched" between two active suit-bidding opponents.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {boolean}
+ */
+export function isSandwichBetweenOpponents(auction, seat) {
+  if (findOwnBid(auction, seat) !== null) return false;
+
+  const partner = PARTNER_SEAT[seat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  const oppSeats = SEATS.filter(s => s !== seat && s !== partner);
+  const suitsBySeat = new Map(oppSeats.map(s => [s, false]));
+
+  for (let i = 0; i < auction.bids.length; i++) {
+    const b = auction.bids[i];
+    const s = SEATS[(dealerIdx + i) % SEATS.length];
+    if (suitsBySeat.has(s) && b.type === 'contract' &&
+        /** @type {import('../model/bid.js').ContractBid} */ (b).strain !== Strain.NOTRUMP) {
+      suitsBySeat.set(s, true);
+    }
+  }
+
+  for (const hasSuit of suitsBySeat.values()) {
+    if (!hasSuit) return false;
+  }
+  return true;
+}
+
+/**
+ * Prefix for direct competitive recommendations so explanations match the table
+ * situation (passed hand, sandwich). Balancing is already woven into scores.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {string}
+ */
+export function directCompetitiveContextPrefix(auction, seat) {
+  const parts = [];
+  if (reopeningWithoutOwnBid(auction, seat)) {
+    parts.push('passed earlier without a suit bid');
+  }
+  if (isSandwichBetweenOpponents(auction, seat)) {
+    parts.push('sandwich seat (both opponents bid suits)');
+  }
+  if (parts.length === 0) return '';
+  return `[${parts.join('; ')}] `;
+}
+
+/**
  * Collect all strains naturally bid by the partnership (seat + partner).
  * @param {Auction} auction
  * @param {Seat} seat

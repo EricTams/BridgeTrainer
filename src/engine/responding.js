@@ -24,13 +24,14 @@ const SUIT_AVAIL_1NT_COST = 2;
 const FIT_AVAIL_1NT_COST = 1.5;
 const SHAPE_SEMI_COST = 4;
 const SHAPE_UNBAL_COST = 8;
-const MAJOR_FIT_2NT_COST = 3;
+const RESP_2NT_STOPPER_COST = 3;
 
 // ── SAYC thresholds ─────────────────────────────────────────────────
 
 const RESP_MIN_HCP = 6;
 const NEW_SUIT_2_MIN_HCP = 10;
 const NEW_SUIT_MIN_LEN = 4;
+const NEW_SUIT_2_MIN_LEN = 5;
 const SINGLE_RAISE_MIN = 6;
 const SINGLE_RAISE_MAX = 10;
 const RAISE_MIN_SUPPORT = 3;
@@ -39,15 +40,19 @@ const LIMIT_RAISE_MAX = 12;
 const LIMIT_RAISE_SUPPORT = 4;
 const RESP_1NT_MIN = 6;
 const RESP_1NT_MAX = 10;
-const RESP_2NT_MIN = 13;
-const RESP_2NT_MAX = 15;
+const RESP_2NT_MINOR_MIN = 11;
+const RESP_2NT_MINOR_MAX = 12;
+const JACOBY_2NT_MIN_HCP = 13;
+const JACOBY_2NT_MIN_SUPPORT = 4;
+const JACOBY_2NT_NO_FIT_COST = 10;
 const JUMP_SHIFT_MIN = 19;
 const JUMP_SHIFT_MIN_LEN = 5;
 const GAME_RAISE_MIN_HCP = 5;
 const GAME_RAISE_MAX_HCP = 10;
 const GAME_RAISE_MIN_SUPPORT = 5;
-const GAME_RAISE_BALANCED_COST = 3;
-const GAME_RAISE_SEMI_BAL_COST = 1.5;
+const GAME_RAISE_BALANCED_COST = 6;
+const GAME_RAISE_SEMI_BAL_COST = 3;
+const MINOR_RAISE_NT_AVAIL_COST = 3;
 const LONG_SUIT_THRESHOLD = 6;
 const RESP_LONG_SUIT_DISCOUNT = 2;
 
@@ -143,7 +148,7 @@ export function getRespondingBids(hand, evaluation, partnerBid) {
   /** @type {BidRecommendation[]} */
   const results = [];
   for (const bid of candidates) {
-    results.push(scoreResponseBid(bid, evaluation, ps));
+    results.push(scoreResponseBid(bid, hand, evaluation, ps));
   }
   return results.sort((a, b) => b.priority - a.priority);
 }
@@ -167,18 +172,19 @@ function respondingCandidates(ps) {
 
 /**
  * @param {import('../model/bid.js').Bid} bid
+ * @param {Hand} hand
  * @param {Evaluation} eval_
  * @param {import('../model/bid.js').Strain} ps - partner's strain
  * @returns {BidRecommendation}
  */
-function scoreResponseBid(bid, eval_, ps) {
+function scoreResponseBid(bid, hand, eval_, ps) {
   if (bid.type === 'pass') return scorePass(bid, eval_);
   if (bid.type !== 'contract') return scored(bid, 0, '');
 
   const { level, strain } = bid;
   if (level === 1 && strain === Strain.NOTRUMP) return scoreResp1NT(bid, eval_, ps);
   if (level === 1) return scoreNewSuit1(bid, eval_, ps);
-  if (level === 2 && strain === Strain.NOTRUMP) return scoreResp2NT(bid, eval_, ps);
+  if (level === 2 && strain === Strain.NOTRUMP) return scoreResp2NT(bid, hand, eval_, ps);
   if (level === 2 && strain === ps) return scoreSingleRaise(bid, eval_, ps);
   if (level === 2 && ranksAbove(strain, ps)) return scoreJumpShift(bid, eval_);
   if (level === 2) return scoreNewSuit2(bid, eval_, ps);
@@ -234,6 +240,7 @@ function scoreNewSuit1(bid, eval_, ps) {
   pen(p, `${hcp} HCP, need ${hcpMin}+`, Math.max(0, hcpMin - hcp) * HCP_COST);
   pen(p, `${len} ${name}, need ${NEW_SUIT_MIN_LEN}+`, Math.max(0, NEW_SUIT_MIN_LEN - len) * LENGTH_SHORT_COST);
   pen(p, 'Better suit available', suitPrefCost(strain, shape, ps));
+  pen(p, 'Equal length: bid higher-ranking suit first', equalLenHigherSuitCost(strain, shape, ps));
   pen(p, 'Major raise available', majorRaiseAvailCost(ps, shape, hcp));
 
   return scored(bid, deduct(penTotal(p)), newSuit1Expl(hcp, len, strain, hcpMin), p);
@@ -249,7 +256,7 @@ function newSuit1Expl(hcp, len, strain, hcpMin) {
   return `${hcp} HCP with ${len} ${name}: bid 1${sym}`;
 }
 
-// ── New suit at 2-level (10+ HCP, 4+ cards, forcing 1 round) ────────
+// ── New suit at 2-level (10+ HCP, 5+ cards, forcing 1 round) ────────
 
 /**
  * @param {import('../model/bid.js').Bid} bid
@@ -265,8 +272,9 @@ function scoreNewSuit2(bid, eval_, ps) {
   /** @type {PenaltyItem[]} */
   const p = [];
   pen(p, `${hcp} HCP, need ${NEW_SUIT_2_MIN_HCP}+`, Math.max(0, NEW_SUIT_2_MIN_HCP - hcp) * HCP_COST);
-  pen(p, `${len} ${name}, need ${NEW_SUIT_MIN_LEN}+`, Math.max(0, NEW_SUIT_MIN_LEN - len) * LENGTH_SHORT_COST);
+  pen(p, `${len} ${name}, need ${NEW_SUIT_2_MIN_LEN}+`, Math.max(0, NEW_SUIT_2_MIN_LEN - len) * LENGTH_SHORT_COST);
   pen(p, 'Better suit available', suitPrefCost(strain, shape, ps));
+  pen(p, 'Equal length: bid higher-ranking suit first', equalLenHigherSuitCost(strain, shape, ps));
   pen(p, 'Major raise available', majorRaiseAvailCost(ps, shape, hcp));
 
   return scored(bid, deduct(penTotal(p)), newSuit2Expl(hcp, len, strain), p);
@@ -276,7 +284,7 @@ function scoreNewSuit2(bid, eval_, ps) {
 function newSuit2Expl(hcp, len, strain) {
   const sym = STRAIN_SYMBOLS[strain];
   const name = STRAIN_DISPLAY[strain];
-  if (len < NEW_SUIT_MIN_LEN) return `${len} ${name}: need ${NEW_SUIT_MIN_LEN}+ for 2${sym}`;
+  if (len < NEW_SUIT_2_MIN_LEN) return `${len} ${name}: need ${NEW_SUIT_2_MIN_LEN}+ for 2${sym}`;
   if (hcp < NEW_SUIT_2_MIN_HCP) return `${hcp} HCP: need ${NEW_SUIT_2_MIN_HCP}+ for 2-level new suit`;
   return `${hcp} HCP with ${len} ${name}: 2${sym} (forcing one round)`;
 }
@@ -289,25 +297,33 @@ function newSuit2Expl(hcp, len, strain) {
  * @param {import('../model/bid.js').Strain} ps
  */
 function scoreSingleRaise(bid, eval_, ps) {
-  const { hcp, shape } = eval_;
+  const { hcp, shape, shapeClass } = eval_;
   const support = suitLen(shape, ps);
   const name = STRAIN_DISPLAY[ps];
+  const balancedMinor = !isMajor(ps) && shapeClass === 'balanced'
+    && hcp >= RESP_1NT_MIN && hcp <= RESP_1NT_MAX;
 
   /** @type {PenaltyItem[]} */
   const p = [];
   pen(p, `${hcp} HCP, need ${SINGLE_RAISE_MIN}-${SINGLE_RAISE_MAX}`, hcpDev(hcp, SINGLE_RAISE_MIN, SINGLE_RAISE_MAX) * HCP_COST);
   pen(p, `${support} ${name}, need ${RAISE_MIN_SUPPORT}+`, Math.max(0, RAISE_MIN_SUPPORT - support) * LENGTH_SHORT_COST);
+  if (balancedMinor) {
+    pen(p, 'Balanced: prefer 1NT over minor raise', MINOR_RAISE_NT_AVAIL_COST);
+  }
 
-  return scored(bid, deduct(penTotal(p)), singleRaiseExpl(hcp, support, ps), p);
+  return scored(bid, deduct(penTotal(p)), singleRaiseExpl(hcp, support, ps, shapeClass), p);
 }
 
-/** @param {number} hcp @param {number} support @param {import('../model/bid.js').Strain} ps */
-function singleRaiseExpl(hcp, support, ps) {
+/** @param {number} hcp @param {number} support @param {import('../model/bid.js').Strain} ps @param {import('./evaluate.js').ShapeClass} shapeClass */
+function singleRaiseExpl(hcp, support, ps, shapeClass) {
   const sym = STRAIN_SYMBOLS[ps];
   const name = STRAIN_DISPLAY[ps];
   if (support < RAISE_MIN_SUPPORT) return `${support} ${name}: need ${RAISE_MIN_SUPPORT}+ to raise`;
   if (hcp < SINGLE_RAISE_MIN) return `${hcp} HCP: too weak to raise (${SINGLE_RAISE_MIN}+)`;
   if (hcp > SINGLE_RAISE_MAX) return `${hcp} HCP: too strong for single raise (${SINGLE_RAISE_MIN}-${SINGLE_RAISE_MAX})`;
+  if (!isMajor(ps) && shapeClass === 'balanced' && hcp >= RESP_1NT_MIN && hcp <= RESP_1NT_MAX) {
+    return `${hcp} HCP, balanced with ${support} ${name}: prefer 1NT (keeps options open)`;
+  }
   return `${hcp} HCP with ${support} ${name}: raise to 2${sym}`;
 }
 
@@ -375,44 +391,83 @@ function resp1NTExpl(hcp, shape, ps) {
   if (suitLen(shape, ps) <= 1 && hcp >= NEW_SUIT_2_MIN_HCP && hasSuitAt2(shape, ps)) {
     return 'Singleton in partner\'s suit: prefer new suit at 2-level';
   }
-  return `${hcp} HCP, no fit or new suit: 1NT response`;
+  const forcing = isMajor(ps) ? 'semi-forcing' : 'non-forcing';
+  return `${hcp} HCP, no fit or new suit: 1NT response (${forcing})`;
 }
 
-// ── 2NT jump response (13-15 HCP, balanced, no major fit) ───────────
+// ── 2NT response (Jacoby 2NT over major / invitational over minor) ───
 
 /**
+ * @param {import('../model/bid.js').Bid} bid
+ * @param {Hand} hand
+ * @param {Evaluation} eval_
+ * @param {import('../model/bid.js').Strain} ps
+ */
+function scoreResp2NT(bid, hand, eval_, ps) {
+  if (isMajor(ps)) return scoreJacoby2NT(bid, eval_, ps);
+  return scoreNatural2NTMinor(bid, hand, eval_, ps);
+}
+
+/**
+ * Jacoby 2NT over 1♥/1♠: game-forcing raise showing 4+ trump support.
+ * Any shape; balanced not required.
  * @param {import('../model/bid.js').Bid} bid
  * @param {Evaluation} eval_
  * @param {import('../model/bid.js').Strain} ps
  */
-function scoreResp2NT(bid, eval_, ps) {
-  const { hcp, shapeClass, shape } = eval_;
+function scoreJacoby2NT(bid, eval_, ps) {
+  const { hcp, shape } = eval_;
+  const support = suitLen(shape, ps);
+  const name = STRAIN_DISPLAY[ps];
 
   /** @type {PenaltyItem[]} */
   const p = [];
-  pen(p, `${hcp} HCP, need ${RESP_2NT_MIN}-${RESP_2NT_MAX}`, hcpDev(hcp, RESP_2NT_MIN, RESP_2NT_MAX) * HCP_COST);
-  pen(p, `${shapeClass} (need balanced)`, shapePenalty(shapeClass));
-  if (isMajor(ps) && suitLen(shape, ps) >= RAISE_MIN_SUPPORT) {
-    pen(p, 'Major fit, prefer raise', MAJOR_FIT_2NT_COST);
+  pen(p, `${hcp} HCP, need ${JACOBY_2NT_MIN_HCP}+`,
+    Math.max(0, JACOBY_2NT_MIN_HCP - hcp) * HCP_COST);
+  if (support < JACOBY_2NT_MIN_SUPPORT) {
+    pen(p, `${support} ${name}: need ${JACOBY_2NT_MIN_SUPPORT}+ for Jacoby 2NT`,
+      JACOBY_2NT_NO_FIT_COST);
   }
 
-  return scored(bid, deduct(penTotal(p)), resp2NTExpl(hcp, shapeClass, shape, ps), p);
+  let expl;
+  if (support < JACOBY_2NT_MIN_SUPPORT) {
+    expl = `${support} ${name}: need ${JACOBY_2NT_MIN_SUPPORT}+ trump support for Jacoby 2NT`;
+  } else if (hcp < JACOBY_2NT_MIN_HCP) {
+    expl = `${hcp} HCP: need ${JACOBY_2NT_MIN_HCP}+ for Jacoby 2NT (game-forcing)`;
+  } else {
+    expl = `${hcp} HCP with ${support} ${name}: Jacoby 2NT (game-forcing, showing fit)`;
+  }
+  return scored(bid, deduct(penTotal(p)), expl, p);
 }
 
 /**
- * @param {number} hcp
- * @param {import('./evaluate.js').ShapeClass} shapeClass
- * @param {number[]} shape
+ * Natural invitational 2NT over 1♣/1♦: 11-12 HCP, balanced, stoppers.
+ * @param {import('../model/bid.js').Bid} bid
+ * @param {Hand} hand
+ * @param {Evaluation} eval_
  * @param {import('../model/bid.js').Strain} ps
  */
-function resp2NTExpl(hcp, shapeClass, shape, ps) {
-  if (shapeClass !== 'balanced') return 'Hand is not balanced for 2NT';
-  if (hcp < RESP_2NT_MIN) return `${hcp} HCP: too weak for 2NT (${RESP_2NT_MIN}+)`;
-  if (hcp > RESP_2NT_MAX) return `${hcp} HCP: above 2NT range (${RESP_2NT_MIN}-${RESP_2NT_MAX})`;
-  if (isMajor(ps) && suitLen(shape, ps) >= RAISE_MIN_SUPPORT) {
-    return `Have major fit: prefer raising ${STRAIN_DISPLAY[ps]}`;
+function scoreNatural2NTMinor(bid, hand, eval_, ps) {
+  const { hcp, shapeClass } = eval_;
+  const rangeMin = RESP_2NT_MINOR_MIN;
+  const rangeMax = RESP_2NT_MINOR_MAX;
+  const unstopped = countUnstoppedSuits(hand, ps);
+
+  /** @type {PenaltyItem[]} */
+  const p = [];
+  pen(p, `${hcp} HCP, need ${rangeMin}-${rangeMax}`, hcpDev(hcp, rangeMin, rangeMax) * HCP_COST);
+  pen(p, `${shapeClass} (need balanced)`, shapePenalty(shapeClass));
+  if (unstopped > 0) {
+    pen(p, `${unstopped} unbid suit(s) without stopper`, unstopped * RESP_2NT_STOPPER_COST);
   }
-  return `${hcp} HCP, balanced: 2NT (game-forcing)`;
+
+  let expl;
+  if (shapeClass !== 'balanced') expl = 'Hand is not balanced for 2NT';
+  else if (hcp < rangeMin) expl = `${hcp} HCP: too weak for 2NT (${rangeMin}+)`;
+  else if (hcp > rangeMax) expl = `${hcp} HCP: above 2NT range (${rangeMin}-${rangeMax})`;
+  else if (unstopped > 0) expl = `${hcp} HCP, balanced but ${unstopped} unbid suit(s) unstopped: 2NT risky`;
+  else expl = `${hcp} HCP, balanced with stoppers: 2NT (invitational)`;
+  return scored(bid, deduct(penTotal(p)), expl, p);
 }
 
 // ── Jump shift (19+ HCP, strong hand) ────────────────────────────────
@@ -1695,6 +1750,40 @@ function posSuitPrefCost(strain, shape) {
 }
 
 /**
+ * Check if hand has a stopper in the given suit.
+ * A, Kx, Qxx, or Jxxx counts as a stopper.
+ * @param {Hand} hand
+ * @param {import('../model/bid.js').Strain} strain
+ * @returns {boolean}
+ */
+function hasStopper(hand, strain) {
+  const suitCards = hand.cards.filter(c => c.suit === /** @type {any} */ (strain));
+  const len = suitCards.length;
+  if (len === 0) return false;
+  const highRank = suitCards.reduce((max, c) => Math.max(max, c.rank), 0);
+  if (highRank === Rank.ACE) return true;
+  if (highRank === Rank.KING && len >= 2) return true;
+  if (highRank === Rank.QUEEN && len >= 3) return true;
+  if (highRank === Rank.JACK && len >= 4) return true;
+  return false;
+}
+
+/**
+ * Count unbid suits (excluding partner's suit) that lack a stopper.
+ * @param {Hand} hand
+ * @param {import('../model/bid.js').Strain} partnerStrain
+ * @returns {number}
+ */
+function countUnstoppedSuits(hand, partnerStrain) {
+  let count = 0;
+  for (const strain of SHAPE_STRAINS) {
+    if (strain === partnerStrain) continue;
+    if (!hasStopper(hand, strain)) count++;
+  }
+  return count;
+}
+
+/**
  * Penalty for bidding a suit that isn't the longest available new suit.
  * @param {import('../model/bid.js').Strain} strain
  * @param {number[]} shape
@@ -1709,6 +1798,25 @@ function suitPrefCost(strain, shape, ps) {
   const thisLen = suitLen(shape, strain);
   if (thisLen >= NEW_SUIT_MIN_LEN && thisLen < maxLen) {
     return (maxLen - thisLen) * SUIT_PREF_COST;
+  }
+  return 0;
+}
+
+/**
+ * With 5+ equal-length suits, SAYC says bid the higher-ranking first
+ * so you can show the lower suit on the rebid. Penalizes the lower suit.
+ * @param {import('../model/bid.js').Strain} strain
+ * @param {number[]} shape
+ * @param {import('../model/bid.js').Strain} ps
+ */
+function equalLenHigherSuitCost(strain, shape, ps) {
+  const thisLen = suitLen(shape, strain);
+  if (thisLen < 5) return 0;
+  for (const s of SHAPE_STRAINS) {
+    if (s === ps || s === strain) continue;
+    if (suitLen(shape, s) === thisLen && ranksAbove(s, strain)) {
+      return SUIT_PREF_COST;
+    }
   }
   return 0;
 }

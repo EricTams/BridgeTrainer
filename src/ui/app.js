@@ -47,6 +47,7 @@ export function initApp(root) {
   /** @type {import('./breakdown-display.js').BidAnnotation[] | null} */
   let bidAnnotations = null;
   let showHandPostBid = false;
+  let showAllHandsPostBid = false;
 
   startPuzzle();
 
@@ -57,6 +58,7 @@ export function initApp(root) {
     completedAuction = null;
     bidAnnotations = null;
     showHandPostBid = false;
+    showAllHandsPostBid = false;
     render();
   }
 
@@ -82,6 +84,13 @@ export function initApp(root) {
 
   function toggleHandPostBid() {
     showHandPostBid = !showHandPostBid;
+    if (showHandPostBid) showAllHandsPostBid = false;
+    render();
+  }
+
+  function toggleAllHandsPostBid() {
+    showAllHandsPostBid = !showAllHandsPostBid;
+    if (showAllHandsPostBid) showHandPostBid = false;
     render();
   }
 
@@ -150,8 +159,11 @@ export function initApp(root) {
         annotations: bidAnnotations || [],
         completedAuction: completedAuction || puzzle.auction,
         playerSeat: PLAYER_SEAT,
+        hands: puzzle.hands,
         handVisible: showHandPostBid,
+        allHandsVisible: showAllHandsPostBid,
         onToggleHand: toggleHandPostBid,
+        onToggleAllHands: toggleAllHandsPostBid,
       }, breakdownEl);
       renderResult({
         playerBid: /** @type {Bid} */ (playerBid),

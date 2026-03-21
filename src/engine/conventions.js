@@ -44,7 +44,10 @@ const CUE_COMBINED_MIN = 29;
 
 // ── Convention response mappings ─────────────────────────────────────
 
-/** Blackwood 4NT ace-showing steps: index = aceCount % 4 */
+/**
+ * Blackwood 4NT ace-showing steps: index = aceCount % 4.
+ * Standard Blackwood (not RKCB): 5♣ = 0 or 4, 5♦ = 1, 5♥ = 2, 5♠ = 3.
+ */
 const BW_RESPONSE_STRAINS = [Strain.CLUBS, Strain.DIAMONDS, Strain.HEARTS, Strain.SPADES];
 
 /** Gerber 4♣ ace-showing steps: index = aceCount % 4 */

@@ -12,6 +12,8 @@ import { groupBySuit } from '../model/hand.js';
  *   shortPoints: number,
  *   longPoints: number,
  *   totalPoints: number,
+ *   suitPoints: number,
+ *   ntPoints: number,
  *   shape: number[],
  *   shapeClass: ShapeClass,
  * }} Evaluation
@@ -39,11 +41,14 @@ export function evaluate(hand) {
   const shortPoints = calcShortPoints(lengths);
   const longPoints = calcLongPoints(lengths);
 
+  const totalPoints = hcp + shortPoints + longPoints;
   return {
     hcp,
     shortPoints,
     longPoints,
-    totalPoints: hcp + shortPoints + longPoints,
+    totalPoints,
+    suitPoints: totalPoints,
+    ntPoints: hcp + longPoints,
     shape: lengths,
     shapeClass: classifyShape(lengths),
   };

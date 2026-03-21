@@ -81,6 +81,14 @@ main {
   gap: 0.35rem;
 }
 
+.hand-hcp-total {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin-bottom: 0.15rem;
+}
+
 .hand-suit-row {
   display: flex;
   align-items: baseline;
@@ -205,7 +213,16 @@ main {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
   margin-bottom: 0.5rem;
+}
+
+.breakdown-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
 }
 
 .breakdown-heading {
@@ -219,6 +236,70 @@ main {
 .breakdown-toggle-btn {
   font-size: 0.75rem;
   padding: 0.2rem 0.6rem;
+}
+
+.breakdown-all-hands {
+  background: var(--color-surface);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  margin-bottom: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.breakdown-hand-row {
+  display: grid;
+  grid-template-columns: 1.6rem 4.25rem 1fr auto;
+  gap: 0.45rem;
+  align-items: baseline;
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.25rem;
+}
+
+.breakdown-hand-hcp {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.breakdown-hand-row-player {
+  background: rgba(88, 166, 255, 0.08);
+}
+
+.breakdown-hand-seat {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.breakdown-team-ns .breakdown-hand-seat {
+  color: var(--color-accent);
+}
+
+.breakdown-hand-condensed {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.hand-condensed-line {
+  white-space: nowrap;
+}
+
+.hand-condensed-line .suit-symbol {
+  width: auto;
+  min-width: 0.85em;
+  margin-right: 0.06em;
+}
+
+.hand-condensed-ranks {
+  letter-spacing: 0.02em;
 }
 
 .breakdown-list {
@@ -705,6 +786,11 @@ main {
     gap: 0;
   }
 
+  .hand-hcp-total {
+    font-size: 0.78rem;
+    margin-bottom: 0.05rem;
+  }
+
   .hand-suit-row {
     font-size: 0.95rem;
     line-height: 1.3;
@@ -761,6 +847,10 @@ main {
     margin-bottom: 0.25rem;
   }
 
+  .breakdown-header-actions {
+    gap: 0.25rem;
+  }
+
   .breakdown-heading {
     font-size: 0.7rem;
   }
@@ -768,6 +858,30 @@ main {
   .breakdown-toggle-btn {
     font-size: 0.65rem;
     padding: 0.12rem 0.35rem;
+  }
+
+  .breakdown-all-hands {
+    padding: 0.35rem 0.45rem;
+    gap: 0.25rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .breakdown-hand-row {
+    grid-template-columns: 1.2rem 3.5rem 1fr auto;
+    gap: 0.3rem;
+    padding: 0.08rem 0.2rem;
+  }
+
+  .breakdown-hand-hcp {
+    font-size: 0.62rem;
+  }
+
+  .breakdown-hand-seat {
+    font-size: 0.72rem;
+  }
+
+  .breakdown-hand-condensed {
+    font-size: 0.68rem;
   }
 
   .breakdown-list {

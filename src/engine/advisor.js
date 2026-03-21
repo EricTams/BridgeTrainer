@@ -97,6 +97,9 @@ export function getRecommendations(hand, auction, seat) {
       if (!partnerBid) {
         if (hasOpponentBids(auction, seat)) {
           results = getCompetitiveBids(hand, eval_, auction, seat);
+          if (myBid && isPreemptLevelBid(myBid)) {
+            results = applyPreemptSilentPartnerPenalty(results, eval_);
+          }
         } else {
           results = getRebidBids(hand, eval_, myBid, myBid, auction, seat, opener);
         }
@@ -192,6 +195,55 @@ function mergeSlamBids(base, slam) {
 function bidKey(bid) {
   if (bid.type === 'contract') return `${bid.level}${bid.strain}`;
   return bid.type;
+}
+
+/**
+ * True when a bid is a weak two (2♦/2♥/2♠) or preempt (3+level suit).
+ * These hands have already fully described their strength and shape.
+ * @param {import('../model/bid.js').ContractBid} bid
+ * @returns {boolean}
+ */
+function isPreemptLevelBid(bid) {
+  if (bid.level >= 3 && bid.strain !== Strain.NOTRUMP) return true;
+  if (bid.level === 2 && bid.strain !== Strain.CLUBS && bid.strain !== Strain.NOTRUMP) return true;
+  return false;
+}
+
+/**
+ * B-08: After opening a preempt or weak two, if partner has been
+ * completely silent (no contract bids), the preemptor should almost
+ * never bid again — their hand is already fully described. Competing
+ * further on minimum values (typical 5–10 HCP) misteaches learners.
+ *
+ * Penalty scales down for hands with genuine extras (13+ HCP) that
+ * arguably shouldn't have preempted in the first place.
+ * @param {BidRecommendation[]} results
+ * @param {ReturnType<typeof evaluate>} eval_
+ * @returns {BidRecommendation[]}
+ */
+function applyPreemptSilentPartnerPenalty(results, eval_) {
+  const PREEMPT_SILENT_BASE = 10;
+  const penalty = Math.max(0, PREEMPT_SILENT_BASE - Math.max(0, eval_.hcp - 12) * 3);
+  if (penalty === 0) return results;
+
+  return results.map(rec => {
+    if (rec.bid.type === 'pass') {
+      return {
+        ...rec,
+        priority: Math.max(rec.priority, 9),
+        explanation: `Already described hand with preempt; partner silent — pass`,
+      };
+    }
+    return {
+      ...rec,
+      priority: rec.priority - penalty,
+      explanation: `[Preempt opener, partner silent] ${rec.explanation}`,
+      penalties: [...rec.penalties, {
+        label: 'Already described hand with preempt; partner silent',
+        amount: penalty,
+      }],
+    };
+  });
 }
 
 /**

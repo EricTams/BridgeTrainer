@@ -1,7 +1,10 @@
 import { STRAIN_SYMBOLS, STRAIN_COLORS } from '../model/bid.js';
+import { evaluate } from '../engine/evaluate.js';
 import { SEATS } from '../model/deal.js';
+import { createCondensedHandLine } from './hand-display.js';
 
 /**
+ * @typedef {import('../model/deal.js').Deal} Deal
  * @typedef {import('../model/deal.js').Seat} Seat
  * @typedef {import('../model/bid.js').Bid} Bid
  * @typedef {import('../model/bid.js').ContractBid} ContractBid
@@ -24,12 +27,27 @@ const PARTNER = { N: 'S', S: 'N', E: 'W', W: 'E' };
  *   annotations: BidAnnotation[],
  *   completedAuction: Auction,
  *   playerSeat: Seat,
+ *   hands: Deal,
  *   handVisible: boolean,
+ *   allHandsVisible: boolean,
  *   onToggleHand: () => void,
+ *   onToggleAllHands: () => void,
  * }} opts
  * @param {HTMLElement} container
  */
-export function renderBreakdown({ annotations, completedAuction, playerSeat, handVisible, onToggleHand }, container) {
+export function renderBreakdown(
+  {
+    annotations,
+    completedAuction,
+    playerSeat,
+    hands,
+    handVisible,
+    allHandsVisible,
+    onToggleHand,
+    onToggleAllHands,
+  },
+  container,
+) {
   container.innerHTML = '';
   container.className = 'breakdown-display';
 
@@ -41,13 +59,28 @@ export function renderBreakdown({ annotations, completedAuction, playerSeat, han
   heading.textContent = 'Bidding Analysis';
   header.appendChild(heading);
 
+  const actions = document.createElement('div');
+  actions.className = 'breakdown-header-actions';
+
   const toggleBtn = document.createElement('button');
   toggleBtn.className = 'tools-btn breakdown-toggle-btn';
   toggleBtn.textContent = handVisible ? 'Hide Hand' : 'Show Hand';
   toggleBtn.addEventListener('click', onToggleHand);
-  header.appendChild(toggleBtn);
+  actions.appendChild(toggleBtn);
+
+  const allBtn = document.createElement('button');
+  allBtn.className = 'tools-btn breakdown-toggle-btn';
+  allBtn.textContent = allHandsVisible ? 'Hide Hands' : 'Show All Hands';
+  allBtn.addEventListener('click', onToggleAllHands);
+  actions.appendChild(allBtn);
+
+  header.appendChild(actions);
 
   container.appendChild(header);
+
+  if (allHandsVisible) {
+    container.appendChild(buildAllHandsPanel(hands, playerSeat));
+  }
 
   const list = document.createElement('div');
   list.className = 'breakdown-list';
@@ -58,6 +91,51 @@ export function renderBreakdown({ annotations, completedAuction, playerSeat, han
 
   container.appendChild(list);
   container.appendChild(buildContractSummary(completedAuction));
+}
+
+/**
+ * @param {Deal} hands
+ * @param {Seat} playerSeat
+ * @returns {HTMLElement}
+ */
+function buildAllHandsPanel(hands, playerSeat) {
+  const panel = document.createElement('div');
+  panel.className = 'breakdown-all-hands';
+
+  for (const seat of SEATS) {
+    const row = document.createElement('div');
+    row.className = 'breakdown-hand-row';
+    if (seat === playerSeat) row.classList.add('breakdown-hand-row-player');
+    const isNS = seat === 'N' || seat === 'S';
+    row.classList.add(isNS ? 'breakdown-team-ns' : 'breakdown-team-ew');
+
+    const seatEl = document.createElement('span');
+    seatEl.className = 'breakdown-hand-seat';
+    seatEl.textContent = seat;
+    seatEl.title = SEAT_NAMES[seat];
+    row.appendChild(seatEl);
+
+    const hcpEl = document.createElement('span');
+    hcpEl.className = 'breakdown-hand-hcp';
+    hcpEl.textContent = `${evaluate(hands[seat]).hcp} HCP`;
+    row.appendChild(hcpEl);
+
+    const handEl = document.createElement('div');
+    handEl.className = 'breakdown-hand-condensed';
+    handEl.appendChild(createCondensedHandLine(hands[seat]));
+    row.appendChild(handEl);
+
+    if (seat === playerSeat) {
+      const tag = document.createElement('span');
+      tag.className = 'breakdown-you-tag';
+      tag.textContent = 'You';
+      row.appendChild(tag);
+    }
+
+    panel.appendChild(row);
+  }
+
+  return panel;
 }
 
 /**
