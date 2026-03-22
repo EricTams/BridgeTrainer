@@ -97,6 +97,16 @@ function scoreResponderRebid(bid, eval_, myBid, openerOpen, openerRebid, respMin
   const ms = myBid.strain;
   const os = openerOpen.strain;
 
+  // Jacoby 2NT continuation: I bid 2NT over partner's 1M, partner rebid
+  // with 3M (minimum), 3NT (extras), or shortness bid
+  if (ms === Strain.NOTRUMP && myBid.level === 2 &&
+      openerOpen.level === 1 && isMajor(os) &&
+      (rs === os ||
+       (rs === Strain.NOTRUMP && openerRebid.level === 3) ||
+       (openerRebid.level === 3 && rs !== os && rs !== Strain.NOTRUMP))) {
+    return scoreRR_afterJacoby2NT(bid, eval_, openerOpen, openerRebid);
+  }
+
   if (rs === ms && ms !== Strain.NOTRUMP) {
     const isGameTry = os === ms && openerRebid.level === myBid.level + 1;
     return scoreRR_afterRaise(bid, eval_, myBid, openerRebid, respMin, gf, isGameTry);
@@ -191,6 +201,105 @@ function scoreRR_afterRaise(bid, eval_, myBid, openerRebid, _respMin, gf, isGame
   }
 
   return scoreGenericRebid(bid, eval_);
+}
+
+// ── After Jacoby 2NT (1M - 2NT - 3M/3NT/4M) ────────────────────────
+
+const JACOBY_SLAM_TRY_MIN = 16;
+
+/**
+ * Responder's continuation after Jacoby 2NT.
+ * Hearts are the agreed trump suit. Opener has shown their hand type
+ * via the rebid (3M = min, 3NT = extras, shortness bid, 4M = min sign-off).
+ *
+ * Responder actions:
+ *   13-15 HCP: bid 4M game (minimum GF)
+ *   16+ HCP: slam exploration (cue bids, Blackwood handled by conventions.js)
+ *   4M game when opener showed minimum: only penalized if responder is very strong
+ *
+ * @param {Bid} bid
+ * @param {Evaluation} eval_
+ * @param {ContractBid} openerOpen
+ * @param {ContractBid} openerRebid
+ * @returns {BidRecommendation}
+ */
+function scoreRR_afterJacoby2NT(bid, eval_, openerOpen, openerRebid) {
+  const { hcp, shape } = eval_;
+  const os = openerOpen.strain;
+  const oSym = STRAIN_SYMBOLS[os];
+  const oSup = suitLen(shape, os);
+  const openerExtras = openerRebid.strain === Strain.NOTRUMP && openerRebid.level === 3;
+  const openerMin = !openerExtras;
+  const estPartnerMin = openerExtras ? 15 : 13;
+  const estPartnerMax = openerExtras ? 21 : 15;
+  const combinedMin = hcp + estPartnerMin;
+  const combinedMax = hcp + estPartnerMax;
+  const SLAM_COMBINED = 33;
+
+  if (isGameLevel(openerRebid)) return scoreAfterGame(bid, openerRebid.level);
+
+  if (bid.type === 'pass') {
+    /** @type {PenaltyItem[]} */ const p = [];
+    pen(p, 'Jacoby 2NT is game-forcing: must bid to game', RR_GF_PASS_COST);
+    return scored(bid, deduct(penTotal(p)), 'Game-forcing auction: must bid', p);
+  }
+  if (bid.type !== 'contract') return scored(bid, 0, '');
+
+  const { level, strain } = bid;
+
+  // 4M game — correct with minimum GF values, underbid with slam potential
+  if (strain === os && level === 4) {
+    /** @type {PenaltyItem[]} */ const p = [];
+    pen(p, `${oSup} ${STRAIN_DISPLAY[os]}, need 4+`,
+      Math.max(0, 4 - oSup) * LENGTH_SHORT_COST);
+    if (combinedMin >= SLAM_COMBINED) {
+      pen(p, `Combined ${combinedMin}-${combinedMax}: slam values, explore before settling`,
+        Math.min(5, (combinedMin - SLAM_COMBINED + 1) * 1.5));
+    }
+    return scored(bid, deduct(penTotal(p)),
+      combinedMin >= SLAM_COMBINED
+        ? `${hcp} HCP: 4${oSym} may be too conservative (combined ${combinedMin}+)`
+        : `${hcp} HCP, ${oSup} ${STRAIN_DISPLAY[os]}: 4${oSym} game`, p);
+  }
+
+  // 3NT — rarely correct after Jacoby; may be quantitative
+  if (strain === Strain.NOTRUMP && level === 3) {
+    /** @type {PenaltyItem[]} */ const p = [];
+    pen(p, 'Have major fit: 3NT unusual after Jacoby 2NT', MAJOR_FIT_GAME_COST + 2);
+    return scored(bid, deduct(penTotal(p)), `${hcp} HCP: 3NT (prefer major game)`, p);
+  }
+
+  // New suit at 4-level: cue bid showing control for slam exploration
+  if (strain !== os && strain !== Strain.NOTRUMP && level >= 4 && level <= 5) {
+    const sSym = STRAIN_SYMBOLS[strain];
+    /** @type {PenaltyItem[]} */ const p = [];
+
+    if (hcp < JACOBY_SLAM_TRY_MIN) {
+      pen(p, `${hcp} HCP: need ${JACOBY_SLAM_TRY_MIN}+ for slam try`,
+        (JACOBY_SLAM_TRY_MIN - hcp) * HCP_COST);
+    }
+    if (combinedMin < SLAM_COMBINED - 4) {
+      pen(p, `Combined ${combinedMin}-${combinedMax}: below slam exploration range`,
+        (SLAM_COMBINED - 4 - combinedMin) * 1.5);
+    }
+    if (level >= 5) {
+      pen(p, `${level}-level cue: high, carries risk`, (level - 4) * 3);
+    }
+
+    return scored(bid, deduct(penTotal(p)),
+      hcp >= JACOBY_SLAM_TRY_MIN
+        ? `${hcp} HCP: ${level}${sSym} cue bid (${STRAIN_DISPLAY[os]} fit, slam try)`
+        : `${hcp} HCP: need ${JACOBY_SLAM_TRY_MIN}+ for slam exploration`, p);
+  }
+
+  // Any other bid (3-level new suit, high NT, etc.) — non-standard in Jacoby context
+  {
+    /** @type {PenaltyItem[]} */ const p = [];
+    pen(p, 'Non-standard after Jacoby 2NT: prefer 4M game or slam exploration', 5);
+    const sym = strain === Strain.NOTRUMP ? 'NT' : STRAIN_SYMBOLS[strain];
+    return scored(bid, deduct(penTotal(p)),
+      `${level}${sym}: non-standard after Jacoby 2NT`, p);
+  }
 }
 
 // ── After opener rebids own suit ─────────────────────────────────────

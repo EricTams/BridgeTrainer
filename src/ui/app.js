@@ -13,6 +13,7 @@ import { renderBidSelector } from './bid-selector.js';
 import { renderResult } from './result-display.js';
 import { renderBreakdown } from './breakdown-display.js';
 import { simulateAuction, formatSimulations } from '../testing/simulator.js';
+import { factCheckBid } from '../engine/fact-check.js';
 
 /**
  * @typedef {import('../puzzle/generator.js').Puzzle} Puzzle
@@ -371,6 +372,9 @@ function el(tag, className) {
 
 const MAX_COMPLETION_BIDS = 60;
 
+/** @type {Record<import('../model/deal.js').Seat, import('../model/deal.js').Seat>} */
+const PARTNER = { N: 'S', S: 'N', E: 'W', W: 'E' };
+
 /**
  * Complete the auction from the current state and annotate every bid
  * (pre-player, player's, and engine-completed) with explanations.
@@ -395,13 +399,16 @@ function completeAndAnnotate(hands, auctionSoFar, dealer, playerBidIndex) {
     const bid = auctionSoFar.bids[i];
     let explanation = '';
 
+    let priority = 0;
     try {
       const recs = getRecommendations(hands[seat], replay, seat);
       const matched = recs.find(r => bidMatches(r.bid, bid));
       explanation = matched ? matched.explanation : '';
+      priority = matched ? matched.priority : 0;
     } catch (_) { /* engine error — leave blank */ }
 
-    annotations.push({ seat, bid, explanation, isPlayer: i === playerBidIndex });
+    const fc = priority >= 0 ? factCheckBid(hands[seat], hands[PARTNER[seat]], bid, explanation) : null;
+    annotations.push({ seat, bid, explanation, isPlayer: i === playerBidIndex, factCheck: fc });
     replay = addBid(replay, bid);
   }
 
@@ -420,11 +427,15 @@ function completeAndAnnotate(hands, auctionSoFar, dealer, playerBidIndex) {
       ? recs[0]
       : { bid: pass(), priority: 0, explanation: 'No recommendations' };
 
+    const fc = chosen.priority >= 0
+      ? factCheckBid(hands[seat], hands[PARTNER[seat]], chosen.bid, chosen.explanation)
+      : null;
     annotations.push({
       seat,
       bid: chosen.bid,
       explanation: chosen.explanation,
       isPlayer: false,
+      factCheck: fc,
     });
 
     try {

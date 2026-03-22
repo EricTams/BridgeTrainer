@@ -742,6 +742,17 @@ function analyzeAuction(auction, seat) {
 
   let agreedStrain = findAgreedStrain(myBids, partnerBids);
 
+  // Jacoby 2NT: 1M by opener, 2NT by responder → major is the agreed suit
+  if (!agreedStrain && myBids.length > 0 && partnerBids.length > 0) {
+    const opener = firstBidder === partner ? partnerBids[0] : myBids[0];
+    const responder = firstBidder === partner ? myBids[0] : partnerBids[0];
+    if (opener.level === 1 &&
+        (opener.strain === Strain.HEARTS || opener.strain === Strain.SPADES) &&
+        responder.level === 2 && responder.strain === Strain.NOTRUMP) {
+      agreedStrain = opener.strain;
+    }
+  }
+
   return {
     myBids,
     partnerBids,

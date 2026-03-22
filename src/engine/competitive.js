@@ -82,6 +82,7 @@ const DBL_UNBID_COST = 2;
 const DBL_PASS_WITH_VALUES_COST = 2;
 const DBL_LEVEL_HCP_STEP = 2;
 const DBL_HIGH_LEVEL_RISK = 2;
+const PASS_NO_ACTION_DISCOUNT = 0.25;
 
 // Re-doubling (penalty after initial takeout): need extras to act again
 const POST_DBL_EXTRAS_MIN = 15;
@@ -280,7 +281,7 @@ function scoreDirectBid(bid, hand, eval_, oppBid, balancing, auction, seat) {
   }
 
   const prefix = directCompetitiveContextPrefix(auction, seat);
-  if (!prefix) return rec;
+  if (!prefix || bid.type === 'pass') return rec;
   return { ...rec, explanation: prefix + rec.explanation };
 }
 
@@ -314,12 +315,19 @@ function scoreDirectPass(bid, hand, eval_, oppBid, balancing) {
     const threshold = OC_1_MIN_HCP - adj;
     if (hcp >= threshold) {
       const bestLen = longestNonOppSuit(shape, oppBid.strain);
-      if (bestLen >= OC_MIN_LEN && hasOvercallQuality(hand, bestSuitExcluding(shape, oppBid.strain))) {
+      const hasOcSuit = bestLen >= OC_MIN_LEN;
+      if (hasOcSuit && hasOvercallQuality(hand, bestSuitExcluding(shape, oppBid.strain))) {
         pen(p, `${hcp} HCP with ${bestLen}-card suit: consider overcalling`,
           (hcp - threshold + 1) * OC_PASS_HCP_COST);
       }
-      pen(p, `${hcp} HCP above pass threshold (${threshold})`,
-        Math.max(0, hcp - threshold) * OC_PASS_HCP_COST);
+      const hasDblAction = hcp >= DBL_MIN_HCP - adj && hasTakeoutShape(shape, oppBid.strain);
+      const passHcpPen = Math.max(0, hcp - threshold) * OC_PASS_HCP_COST;
+      if (hasOcSuit || hasDblAction) {
+        pen(p, `${hcp} HCP above pass threshold (${threshold})`, passHcpPen);
+      } else if (passHcpPen > 0) {
+        pen(p, `${hcp} HCP above pass threshold (${threshold})`,
+          passHcpPen * PASS_NO_ACTION_DISCOUNT);
+      }
     }
     if (hcp >= DBL_MIN_HCP - adj && hasTakeoutShape(shape, oppBid.strain)) {
       pen(p, 'Takeout double shape available', DBL_PASS_WITH_VALUES_COST);
@@ -1006,7 +1014,7 @@ function scoreAdvanceDoubleBid(bid, hand, eval_, oppBid, balancing) {
   if (bid.type !== 'contract') return scored(bid, 0, '');
 
   const { level, strain } = bid;
-  if (strain === oppBid.strain) return scoreAdvDblCuebid(bid, eval_);
+  if (strain === oppBid.strain) return scoreAdvDblCuebid(bid, eval_, oppBid);
   if (strain === Strain.NOTRUMP) return scoreAdvDblNT(bid, hand, eval_, oppBid);
   return scoreAdvDblSuit(bid, eval_, oppBid, balancing);
 }
@@ -1109,16 +1117,24 @@ function scoreAdvDblSuit(bid, eval_, oppBid, balancing) {
 /**
  * @param {Bid} bid
  * @param {Evaluation} eval_
+ * @param {ContractBid} oppBid
  */
-function scoreAdvDblCuebid(bid, eval_) {
+function scoreAdvDblCuebid(bid, eval_, oppBid) {
   const { hcp } = eval_;
+  const { level } = /** @type {ContractBid} */ (bid);
+  const cheapest = cheapestBidLevel(bid.strain, oppBid);
   /** @type {PenaltyItem[]} */
   const p = [];
-  pen(p, `${hcp} HCP, need ${ADV_GF_MIN}+`, Math.max(0, ADV_GF_MIN - hcp) * HCP_COST);
+  const minHcp = ADV_GF_MIN + Math.max(0, level - cheapest) * 3;
+  pen(p, `${hcp} HCP, need ${minHcp}+`, Math.max(0, minHcp - hcp) * HCP_COST);
 
-  const expl = hcp >= ADV_GF_MIN
+  if (level > cheapest) {
+    pen(p, `${level}-level cue bid: ${cheapest} suffices`, (level - cheapest) * 3);
+  }
+
+  const expl = hcp >= minHcp
     ? `${hcp} HCP: cue bid (game-forcing advance)`
-    : `${hcp} HCP: need ${ADV_GF_MIN}+ for cue bid`;
+    : `${hcp} HCP: need ${minHcp}+ for cue bid`;
   return scored(bid, deduct(penTotal(p)), expl, p);
 }
 

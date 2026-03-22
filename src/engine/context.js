@@ -309,13 +309,13 @@ export function isSandwichBetweenOpponents(auction, seat) {
 export function directCompetitiveContextPrefix(auction, seat) {
   const parts = [];
   if (reopeningWithoutOwnBid(auction, seat)) {
-    parts.push('passed earlier without a suit bid');
+    parts.push('passed hand');
   }
   if (isSandwichBetweenOpponents(auction, seat)) {
-    parts.push('sandwich seat (both opponents bid suits)');
+    parts.push('sandwich');
   }
   if (parts.length === 0) return '';
-  return `[${parts.join('; ')}] `;
+  return `(${parts.join(', ')}) `;
 }
 
 /**

@@ -274,7 +274,17 @@ function contEstimatePartnerRange(auction, seat) {
   } else {
     if (strain === Strain.NOTRUMP) {
       if (level === 1) range = { min: 6, max: 10 };
-      else if (level === 2) range = { min: 13, max: 15 };
+      else if (level === 2) {
+        // Check for Jacoby 2NT: partner bid 2NT over our 1M opening
+        const ownFirst = findOwnBid(auction, seat);
+        if (ownFirst && ownFirst.level === 1 && isMajor(ownFirst.strain) &&
+            isOpener(auction, seat)) {
+          // Jacoby 2NT — game-forcing, 13+ HCP with 4+ trump support
+          range = { min: 13, max: 21 };
+        } else {
+          range = { min: 13, max: 15 };
+        }
+      }
       else range = { min: 13, max: 17 };
     } else {
       const ownFirst = findOwnBid(auction, seat);
@@ -290,6 +300,26 @@ function contEstimatePartnerRange(auction, seat) {
         range = { min: 6, max: 17 };
       }
     }
+  }
+
+  // Jacoby 2NT: I responded 2NT to partner's 1M opening.
+  // Partner's rebids have specific, narrow meanings that override generic narrowing.
+  const ownFirst = findOwnBid(auction, seat);
+  if (partnerOpened && isMajor(strain) && level === 1 &&
+      ownFirst && ownFirst.level === 2 && ownFirst.strain === Strain.NOTRUMP) {
+    range = narrowByJacobyContext(range, partnerFirst, auction, seat);
+    range = narrowByPartnerPasses(range, auction, seat);
+    return range;
+  }
+
+  // Mirror: I opened 1M and partner bid Jacoby 2NT.
+  // Partner's subsequent bids have Jacoby-specific meanings.
+  if (!partnerOpened && ownFirst && ownFirst.level === 1 && isMajor(ownFirst.strain) &&
+      isOpener(auction, seat) &&
+      partnerFirst.level === 2 && partnerFirst.strain === Strain.NOTRUMP) {
+    range = narrowByPartnerJacobyBids(range, auction, seat);
+    range = narrowByPartnerPasses(range, auction, seat);
+    return range;
   }
 
   const partnerLast = findPartnerLastBid(auction, seat);
@@ -326,6 +356,107 @@ function narrowByPartnerPasses(range, auction, seat) {
   const reduction = passes * 2;
   const newMax = Math.max(range.min, range.max - reduction);
   return { min: range.min, max: newMax };
+}
+
+/**
+ * Narrow partner's range using the Jacoby 2NT rebid structure.
+ * After 1M - 2NT (Jacoby):
+ *   3-level new suit = shortness (any strength)
+ *   3M = minimum, no shortness (13-15)
+ *   3NT = extras, no shortness (15+)
+ *   4M = minimum sign-off (13-15)
+ * Subsequent bids after cue-bid exchange don't widen the range.
+ * @param {{ min: number, max: number }} base
+ * @param {ContractBid} partnerFirst
+ * @param {Auction} auction
+ * @param {import('../model/deal.js').Seat} seat
+ * @returns {{ min: number, max: number }}
+ */
+function narrowByJacobyContext(base, partnerFirst, auction, seat) {
+  const partner = CONT_PARTNER[seat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  const ps = partnerFirst.strain;
+  let { min, max } = base;
+
+  // Find partner's first rebid (the bid right after our Jacoby 2NT)
+  let foundOur2NT = false;
+  for (let i = 0; i < auction.bids.length; i++) {
+    const s = SEATS[(dealerIdx + i) % SEATS.length];
+    const b = auction.bids[i];
+    if (s === seat && b.type === 'contract' &&
+        /** @type {ContractBid} */ (b).level === 2 &&
+        /** @type {ContractBid} */ (b).strain === Strain.NOTRUMP) {
+      foundOur2NT = true;
+      continue;
+    }
+    if (foundOur2NT && s === partner && b.type === 'contract') {
+      const rebid = /** @type {ContractBid} */ (b);
+      if (rebid.strain === ps && rebid.level === 3) {
+        // 3M = minimum, no shortness
+        return { min, max: Math.min(max, 15) };
+      }
+      if (rebid.strain === Strain.NOTRUMP && rebid.level === 3) {
+        // 3NT = extras, no shortness
+        return { min: Math.max(min, 15), max };
+      }
+      if (rebid.strain === ps && rebid.level >= 4) {
+        // 4M = minimum sign-off
+        return { min, max: Math.min(max, 15) };
+      }
+      if (rebid.level === 3 && rebid.strain !== ps &&
+          rebid.strain !== Strain.NOTRUMP) {
+        // 3-level new suit = shortness (any strength — can't narrow much)
+        return { min, max };
+      }
+      break;
+    }
+  }
+  return { min, max };
+}
+
+/**
+ * Narrow the range of a partner who bid Jacoby 2NT based on their
+ * subsequent bids. Cue bids at 4+ level indicate slam interest (16+ HCP).
+ * Signing off at 4M suggests minimum GF (13-15).
+ * @param {{ min: number, max: number }} base
+ * @param {Auction} auction
+ * @param {import('../model/deal.js').Seat} seat
+ * @returns {{ min: number, max: number }}
+ */
+function narrowByPartnerJacobyBids(base, auction, seat) {
+  const partner = CONT_PARTNER[seat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  const ownFirst = findOwnBid(auction, seat);
+  if (!ownFirst) return base;
+  const agreedMajor = ownFirst.strain;
+  let { min, max } = base;
+
+  // Scan partner's bids after their Jacoby 2NT
+  let foundJacoby = false;
+  for (let i = 0; i < auction.bids.length; i++) {
+    const s = SEATS[(dealerIdx + i) % SEATS.length];
+    const b = auction.bids[i];
+    if (s === partner && b.type === 'contract') {
+      const cb = /** @type {ContractBid} */ (b);
+      if (!foundJacoby) {
+        if (cb.level === 2 && cb.strain === Strain.NOTRUMP) foundJacoby = true;
+        continue;
+      }
+      // Partner's bids after Jacoby 2NT
+      if (cb.strain === agreedMajor && cb.level >= 4) {
+        // Sign-off at game in agreed major → minimum GF
+        max = Math.min(max, 16);
+      } else if (cb.strain !== agreedMajor && cb.strain !== Strain.NOTRUMP &&
+                 cb.level >= 4) {
+        // Cue bid at 4+ level → slam interest, 16+ HCP
+        min = Math.max(min, 16);
+      } else if (cb.level === 4 && cb.strain === Strain.NOTRUMP) {
+        // Blackwood → slam interest, 16+
+        min = Math.max(min, 16);
+      }
+    }
+  }
+  return { min, max };
 }
 
 /**
@@ -425,6 +556,16 @@ function contScore(bid, hand, eval_, partnerLast, ownLast, forcing,
 
   if (bid.type === 'pass') {
     if (gameReached && !forcing) {
+      const effMin = Math.max(combinedMin, partnershipFloor);
+      const combinedMid = (effMin + combinedMax) / 2;
+      if (combinedMid >= CONT_COMBINED_SLAM) {
+        /** @type {PenaltyItem[]} */
+        const p = [];
+        pen(p, `Combined ~${effMin}-${combinedMax}: slam values, consider exploring`,
+          CONT_SLAM_PASS_COST);
+        return scored(bid, deduct(penTotal(p)),
+          `Game reached but combined ${effMin}-${combinedMax}: slam potential`, p);
+      }
       return scored(bid, deduct(0), 'Game reached: pass');
     }
     return contScorePass(bid, eval_, partnerLast, forcing, fitStrain,
@@ -543,12 +684,18 @@ function contScoreAboveGame(bid, eval_, combinedMin, combinedMax, partnershipFlo
   if (combinedMid < CONT_COMBINED_SLAM) {
     pen(p, `Game reached, combined ~${effMin}-${combinedMax}: below slam values`,
       CONT_ABOVE_GAME_COST * (level - 3));
-  }
-  if (level >= 6) {
-    pen(p, `${level}-level bid carries inherent risk`, (level - 5) * 3);
+    if (level >= 6) {
+      pen(p, `${level}-level bid carries inherent risk`, (level - 5) * 3);
+    }
+  } else {
+    // Combined values support slam — penalize 5-level bids that stop short
+    if (level === 5) {
+      pen(p, `Combined ${effMin}-${combinedMax} with slam values: 5-level is awkward`, 2);
+    }
   }
   if (level === 7 && combinedMid < 37) {
-    pen(p, `Combined ~${combinedMid}: far below grand slam values`, (37 - combinedMid) * 1.5);
+    pen(p, `Combined ~${Math.round(combinedMid)}: below grand slam values`,
+      (37 - combinedMid) * 1.5);
   }
   return scored(bid, deduct(penTotal(p)),
     combinedMid >= CONT_COMBINED_SLAM

@@ -2,6 +2,7 @@ import { STRAIN_SYMBOLS, STRAIN_COLORS } from '../model/bid.js';
 import { evaluate } from '../engine/evaluate.js';
 import { SEATS } from '../model/deal.js';
 import { createCondensedHandLine } from './hand-display.js';
+import { formatFactCheck } from '../engine/fact-check.js';
 
 /**
  * @typedef {import('../model/deal.js').Deal} Deal
@@ -9,11 +10,13 @@ import { createCondensedHandLine } from './hand-display.js';
  * @typedef {import('../model/bid.js').Bid} Bid
  * @typedef {import('../model/bid.js').ContractBid} ContractBid
  * @typedef {import('../model/bid.js').Auction} Auction
+ * @typedef {import('../engine/fact-check.js').FactCheckResult} FactCheckResult
  * @typedef {{
  *   seat: Seat,
  *   bid: Bid,
  *   explanation: string,
  *   isPlayer: boolean,
+ *   factCheck?: FactCheckResult | null,
  * }} BidAnnotation
  */
 
@@ -163,6 +166,13 @@ function buildAnnotationRow(ann) {
   const explEl = document.createElement('span');
   explEl.className = 'breakdown-explanation';
   explEl.textContent = ann.explanation;
+  if (ann.factCheck) {
+    const lieEl = document.createElement('span');
+    lieEl.className = 'breakdown-lie';
+    lieEl.textContent = ` [${formatFactCheck(ann.factCheck)}]`;
+    lieEl.title = 'This claim does not match the actual hand values';
+    explEl.appendChild(lieEl);
+  }
   row.appendChild(explEl);
 
   if (ann.isPlayer) {

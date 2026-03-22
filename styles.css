@@ -349,6 +349,13 @@ main {
   text-overflow: ellipsis;
 }
 
+.breakdown-lie {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #e5534b;
+  white-space: nowrap;
+}
+
 .breakdown-you-tag {
   font-size: 0.65rem;
   font-weight: 600;
@@ -905,6 +912,10 @@ main {
 
   .breakdown-explanation {
     font-size: 0.65rem;
+  }
+
+  .breakdown-lie {
+    font-size: 0.6rem;
   }
 
   .breakdown-you-tag {
