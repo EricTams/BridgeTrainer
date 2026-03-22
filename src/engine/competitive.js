@@ -100,6 +100,7 @@ const ADV_2NT_MAX = 12;
 const ADV_3NT_MIN = 13;
 const ADV_SUIT_MIN = 4;
 const ADV_CUEBID_COST = 5;
+const CUE_BID_HCP_COST = 4;
 const ADV_PASS_COST = 10;
 
 // Advance partner's overcall
@@ -175,7 +176,7 @@ export function getCompetitiveBids(hand, eval_, auction, seat) {
     if (doubledBid && doubledBid.strain === Strain.NOTRUMP) {
       return scoreAdvancePenaltyDblCandidates(hand, eval_, oppBid, balancing, auction);
     }
-    return scoreAdvanceDoubleCandidates(hand, eval_, oppBid, balancing, auction);
+    return scoreAdvanceDoubleCandidates(hand, eval_, oppBid, balancing, auction, doubledBid);
   }
   return scoreDirectCandidates(hand, eval_, oppBid, balancing, auction, seat);
 }
@@ -312,7 +313,15 @@ function scoreDirectPass(bid, hand, eval_, oppBid, balancing) {
         (bestLen - OC_MIN_LEN + 1) * OC_PASS_SUIT_COST);
     }
   } else {
-    const threshold = OC_1_MIN_HCP - adj;
+    // B-44: At 4+ level, balancing discount doesn't apply (not a 1-2 level
+    // "partner's trapped values" situation) and pass threshold is raised
+    const passAdj = oppBid.level >= 4 ? 0 : adj;
+    const levelThresholdAdj = Math.max(0, oppBid.level - 2) * 2;
+    const threshold = OC_1_MIN_HCP - passAdj + levelThresholdAdj;
+    const levelExtra = Math.max(0, oppBid.level - 1) * DBL_LEVEL_HCP_STEP;
+    const oppLen = suitLen(shape, oppBid.strain);
+    const dblShapeAdj = oppLen === 0 ? IDEAL_TAKEOUT_VOID_BONUS : (oppLen === 1 ? 1 : 0);
+    const dblMinHcp = Math.max(10, DBL_MIN_HCP + levelExtra - adj - dblShapeAdj);
     if (hcp >= threshold) {
       const bestLen = longestNonOppSuit(shape, oppBid.strain);
       const hasOcSuit = bestLen >= OC_MIN_LEN;
@@ -320,7 +329,7 @@ function scoreDirectPass(bid, hand, eval_, oppBid, balancing) {
         pen(p, `${hcp} HCP with ${bestLen}-card suit: consider overcalling`,
           (hcp - threshold + 1) * OC_PASS_HCP_COST);
       }
-      const hasDblAction = hcp >= DBL_MIN_HCP - adj && hasTakeoutShape(shape, oppBid.strain);
+      const hasDblAction = hcp >= dblMinHcp && hasTakeoutShape(shape, oppBid.strain);
       const passHcpPen = Math.max(0, hcp - threshold) * OC_PASS_HCP_COST;
       if (hasOcSuit || hasDblAction) {
         pen(p, `${hcp} HCP above pass threshold (${threshold})`, passHcpPen);
@@ -329,7 +338,7 @@ function scoreDirectPass(bid, hand, eval_, oppBid, balancing) {
           passHcpPen * PASS_NO_ACTION_DISCOUNT);
       }
     }
-    if (hcp >= DBL_MIN_HCP - adj && hasTakeoutShape(shape, oppBid.strain)) {
+    if (hcp >= dblMinHcp && hasTakeoutShape(shape, oppBid.strain)) {
       pen(p, 'Takeout double shape available', DBL_PASS_WITH_VALUES_COST);
     }
   }
@@ -972,12 +981,13 @@ function scorePostDblNewSuit(bid, eval_) {
  * @param {Auction} auction
  * @returns {BidRecommendation[]}
  */
-function scoreAdvanceDoubleCandidates(hand, eval_, oppBid, balancing, auction) {
+function scoreAdvanceDoubleCandidates(hand, eval_, oppBid, balancing, auction, doubledBid) {
   const candidates = advanceDoubleCandidates(auction, oppBid);
+  const doubledStrain = doubledBid ? doubledBid.strain : null;
   /** @type {BidRecommendation[]} */
   const results = [];
   for (const bid of candidates) {
-    results.push(scoreAdvanceDoubleBid(bid, hand, eval_, oppBid, balancing));
+    results.push(scoreAdvanceDoubleBid(bid, hand, eval_, oppBid, balancing, doubledStrain));
   }
   return results.sort((a, b) => b.priority - a.priority);
 }
@@ -1007,16 +1017,22 @@ function advanceDoubleCandidates(auction, _oppBid) {
  * @param {Evaluation} eval_
  * @param {ContractBid} oppBid
  * @param {boolean} balancing
+ * @param {import('../model/bid.js').Strain | null} doubledStrain
  * @returns {BidRecommendation}
  */
-function scoreAdvanceDoubleBid(bid, hand, eval_, oppBid, balancing) {
+function scoreAdvanceDoubleBid(bid, hand, eval_, oppBid, balancing, doubledStrain) {
   if (bid.type === 'pass') return scoreAdvDblPass(bid, hand, eval_, oppBid);
   if (bid.type !== 'contract') return scored(bid, 0, '');
 
   const { level, strain } = bid;
   if (strain === oppBid.strain) return scoreAdvDblCuebid(bid, eval_, oppBid);
+  // B-54: Bidding the doubled suit (opponent's original suit) is a cue bid,
+  // not a natural advance — even if opponents have since bid a different suit
+  if (doubledStrain && strain === doubledStrain && strain !== oppBid.strain) {
+    return scoreAdvDblCuebid(bid, eval_, oppBid);
+  }
   if (strain === Strain.NOTRUMP) return scoreAdvDblNT(bid, hand, eval_, oppBid);
-  return scoreAdvDblSuit(bid, eval_, oppBid, balancing);
+  return scoreAdvDblSuit(bid, eval_, oppBid, balancing, doubledStrain);
 }
 
 // ── Advance Double: Pass (convert to penalty -- rare) ────────────────
@@ -1063,7 +1079,7 @@ function scoreAdvDblPass(bid, hand, eval_, oppBid) {
  * @param {ContractBid} oppBid
  * @param {boolean} balancing
  */
-function scoreAdvDblSuit(bid, eval_, oppBid, balancing) {
+function scoreAdvDblSuit(bid, eval_, oppBid, balancing, doubledStrain) {
   const { hcp, shape } = eval_;
   const { level, strain } = /** @type {ContractBid} */ (bid);
   const len = suitLen(shape, strain);
@@ -1126,7 +1142,8 @@ function scoreAdvDblCuebid(bid, eval_, oppBid) {
   /** @type {PenaltyItem[]} */
   const p = [];
   const minHcp = ADV_GF_MIN + Math.max(0, level - cheapest) * 3;
-  pen(p, `${hcp} HCP, need ${minHcp}+`, Math.max(0, minHcp - hcp) * HCP_COST);
+  // B-53: Steeper penalty for under-strength cue bids — stated requirements must be enforced
+  pen(p, `${hcp} HCP, need ${minHcp}+`, Math.max(0, minHcp - hcp) * CUE_BID_HCP_COST);
 
   if (level > cheapest) {
     pen(p, `${level}-level cue bid: ${cheapest} suffices`, (level - cheapest) * 3);
@@ -1307,7 +1324,8 @@ function scoreAdvOcCuebid(bid, eval_, ps) {
   /** @type {PenaltyItem[]} */
   const p = [];
   const minHcp = AOC_CUEBID_MIN + Math.max(0, level - 3) * 3;
-  pen(p, `${hcp} HCP, need ${minHcp}+`, Math.max(0, minHcp - hcp) * HCP_COST);
+  // B-53: Steeper penalty for under-strength cue bids
+  pen(p, `${hcp} HCP, need ${minHcp}+`, Math.max(0, minHcp - hcp) * CUE_BID_HCP_COST);
   pen(p, `${support} ${name}, need ${AOC_CUEBID_SUPPORT}+`,
     Math.max(0, AOC_CUEBID_SUPPORT - support) * LENGTH_SHORT_COST);
   if (level >= 4) {
@@ -1590,7 +1608,7 @@ function scoreNegDblNewSuit(bid, eval_, oppBid) {
   pen(p, `${hcp} HCP, need ${minHcp}+`, Math.max(0, minHcp - hcp) * HCP_COST);
 
   if (strain === oppBid.strain) {
-    pen(p, 'Bidding opponent\'s suit', ADV_CUEBID_COST);
+    pen(p, 'Bidding opponent\'s suit: treat as cue bid', ADV_CUEBID_COST + 3);
   }
 
   if (level >= 3) {
@@ -1830,20 +1848,23 @@ function advSuitPrefCost(strain, shape, oppStrain) {
  * @returns {{ minHcp: number, maxHcp: number, minLen: number, lenShortMult: number }}
  */
 function overcallReqs(level, adj) {
+  // B-44: Balancing discount doesn't apply at 4+ level — competing that
+  // high is a positive-values decision, not a trapped-values rescue
+  const effAdj = level >= 4 ? Math.min(adj, 1) : adj;
   if (level === 1) {
-    return { minHcp: OC_1_MIN_HCP - adj, maxHcp: OC_1_MAX_HCP, minLen: OC_MIN_LEN, lenShortMult: LENGTH_SHORT_COST };
+    return { minHcp: OC_1_MIN_HCP - effAdj, maxHcp: OC_1_MAX_HCP, minLen: OC_MIN_LEN, lenShortMult: LENGTH_SHORT_COST };
   }
   if (level === 2) {
-    return { minHcp: OC_2_MIN_HCP - adj, maxHcp: OC_2_MAX_HCP, minLen: OC_MIN_LEN, lenShortMult: LENGTH_SHORT_COST };
+    return { minHcp: OC_2_MIN_HCP - effAdj, maxHcp: OC_2_MAX_HCP, minLen: OC_MIN_LEN, lenShortMult: LENGTH_SHORT_COST };
   }
   if (level === 3) {
-    return { minHcp: OC_3_MIN_HCP - adj, maxHcp: OC_2_MAX_HCP, minLen: OC_3_MIN_LEN, lenShortMult: LENGTH_SHORT_COST + 1 };
+    return { minHcp: OC_3_MIN_HCP - effAdj, maxHcp: OC_2_MAX_HCP, minLen: OC_3_MIN_LEN, lenShortMult: LENGTH_SHORT_COST + 1 };
   }
   if (level === 4) {
-    return { minHcp: OC_4_MIN_HCP - adj, maxHcp: 18, minLen: OC_4_MIN_LEN, lenShortMult: LENGTH_SHORT_COST + 2 };
+    return { minHcp: OC_4_MIN_HCP - effAdj, maxHcp: 18, minLen: OC_4_MIN_LEN, lenShortMult: LENGTH_SHORT_COST + 2 };
   }
   // 5-level and above
-  return { minHcp: OC_5_MIN_HCP - adj, maxHcp: 20, minLen: OC_5_MIN_LEN, lenShortMult: LENGTH_SHORT_COST + 3 };
+  return { minHcp: OC_5_MIN_HCP - effAdj, maxHcp: 20, minLen: OC_5_MIN_LEN, lenShortMult: LENGTH_SHORT_COST + 3 };
 }
 
 /**

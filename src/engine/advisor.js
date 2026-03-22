@@ -1,6 +1,7 @@
 import { pass, contractBid, Strain, STRAIN_ORDER, lastContractBid, isLegalBid } from '../model/bid.js';
 import { evaluate } from './evaluate.js';
 import { classifyAuction, findPartnerBid, findPartnerLastBid, findOwnBid, findOpponentBid, hasOpponentBids, countOwnBids, isOpener, hasPlayerDoubled, hasPartnerDoubled, opponentsOutbidPartnership, opponentStrains, hasDoubleAfterPartnerBid, isTransferContextDead } from './context.js';
+import { SEATS } from '../model/deal.js';
 import { getOpeningBids } from './opening.js';
 import { getRespondingBids } from './responding.js';
 import { getRebidBids, getContinuationBids, getResponderRebidBids } from './rebid.js';
@@ -99,6 +100,8 @@ export function getRecommendations(hand, auction, seat) {
           results = getCompetitiveBids(hand, eval_, auction, seat);
           if (myBid && isPreemptLevelBid(myBid)) {
             results = applyPreemptSilentPartnerPenalty(results, eval_);
+          } else if (myBid) {
+            results = applySilentPartnerRebidPenalty(results, eval_);
           }
         } else {
           results = getRebidBids(hand, eval_, myBid, myBid, auction, seat, opener);
@@ -110,6 +113,9 @@ export function getRecommendations(hand, auction, seat) {
         if (partnerLastBid &&
             (partnerLastBid.level !== partnerBid.level || partnerLastBid.strain !== partnerBid.strain)) {
           results = getResponderRebidBids(hand, eval_, myBid, partnerBid, partnerLastBid, auction, seat);
+          // B-52: If opponents doubled our competitive contract, prefer
+          // passing (profitable defense) over running to game with minimum
+          results = applyDoubledAtCompetitiveLevelPenalty(results, eval_, auction, seat);
           break;
         }
         if (hasOpponentBids(auction, seat)) {
@@ -243,6 +249,121 @@ function applyPreemptSilentPartnerPenalty(results, eval_) {
         amount: penalty,
       }],
     };
+  });
+}
+
+/**
+ * B-45: When a player already bid (overcall or opening) and partner was
+ * silent, re-entering the competitive auction requires extras. Without
+ * partner support, jumping to game on minimum values is a common overbid.
+ * Lighter than the preempt penalty (base 4 vs 10) because overcalls/openings
+ * show a wider range and re-entry is sometimes justified.
+ * @param {BidRecommendation[]} results
+ * @param {ReturnType<typeof evaluate>} eval_
+ * @returns {BidRecommendation[]}
+ */
+function applySilentPartnerRebidPenalty(results, eval_) {
+  const SILENT_REBID_BASE = 4;
+  const penalty = Math.max(0, SILENT_REBID_BASE - Math.max(0, eval_.hcp - 14) * 2);
+  if (penalty === 0) return results;
+
+  return results.map(rec => {
+    if (rec.bid.type === 'pass') {
+      return {
+        ...rec,
+        priority: Math.max(rec.priority, 7),
+        explanation: `Already described hand; partner silent — pass`,
+      };
+    }
+    return {
+      ...rec,
+      priority: rec.priority - penalty,
+      explanation: rec.explanation,
+      penalties: [...rec.penalties, {
+        label: 'Already bid and partner silent: need extras to re-enter',
+        amount: penalty,
+      }],
+    };
+  });
+}
+
+/** @type {Readonly<Record<import('../model/deal.js').Seat, import('../model/deal.js').Seat>>} */
+const PARTNER_SEAT_MAP = { N: 'S', S: 'N', E: 'W', W: 'E' };
+
+/**
+ * B-52: When opponents double our competitive contract at a non-game
+ * level and we have minimum values, pass is almost always correct —
+ * the double is likely a profitable defensive opportunity. Running to
+ * game with ~8 HCP misteaches learners.
+ * @param {BidRecommendation[]} results
+ * @param {ReturnType<typeof evaluate>} eval_
+ * @param {import('../model/bid.js').Auction} auction
+ * @param {import('../model/deal.js').Seat} seat
+ * @returns {BidRecommendation[]}
+ */
+function applyDoubledAtCompetitiveLevelPenalty(results, eval_, auction, seat) {
+  if (auction.bids.length < 3) return results;
+
+  // Check if the last bid was an opponent's double
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  const lastIdx = auction.bids.length - 1;
+  const lastBid = auction.bids[lastIdx];
+  const lastBidSeat = SEATS[(dealerIdx + lastIdx) % SEATS.length];
+  const partner = PARTNER_SEAT_MAP[seat];
+  if (lastBid.type !== 'double') return results;
+  if (lastBidSeat === seat || lastBidSeat === partner) return results;
+
+  // Find the contract bid that was doubled (the last contract bid before the double)
+  /** @type {import('../model/bid.js').ContractBid | null} */
+  let doubledContract = null;
+  for (let i = lastIdx - 1; i >= 0; i--) {
+    if (auction.bids[i].type === 'contract') {
+      doubledContract = /** @type {import('../model/bid.js').ContractBid} */ (auction.bids[i]);
+      break;
+    }
+  }
+  if (!doubledContract) return results;
+
+  // Only apply when our partnership's bid was doubled at a competitive (non-game) level
+  const dcSeat = (() => {
+    for (let i = lastIdx - 1; i >= 0; i--) {
+      if (auction.bids[i].type === 'contract') {
+        return SEATS[(dealerIdx + i) % SEATS.length];
+      }
+    }
+    return null;
+  })();
+  if (dcSeat !== seat && dcSeat !== partner) return results;
+  if (doubledContract.level >= 4) return results;
+
+  if (eval_.hcp >= 12) return results;
+
+  const runPenalty = Math.max(0, (12 - eval_.hcp) * 1.5);
+  return results.map(rec => {
+    if (rec.bid.type === 'pass') {
+      return {
+        ...rec,
+        priority: Math.max(rec.priority, 9),
+        explanation: `Opponents doubled ${doubledContract.level}${doubledContract.strain === Strain.NOTRUMP ? 'NT' : doubledContract.strain}: pass for profitable defense`,
+      };
+    }
+    if (rec.bid.type === 'contract') {
+      const cb = /** @type {import('../model/bid.js').ContractBid} */ (rec.bid);
+      const isGame = (cb.strain === Strain.NOTRUMP && cb.level >= 3) ||
+                     ((cb.strain === Strain.SPADES || cb.strain === Strain.HEARTS) && cb.level >= 4) ||
+                     cb.level >= 5;
+      if (isGame) {
+        return {
+          ...rec,
+          priority: rec.priority - runPenalty,
+          penalties: [...rec.penalties, {
+            label: `Opponents doubled: ${eval_.hcp} HCP too weak to run to game`,
+            amount: runPenalty,
+          }],
+        };
+      }
+    }
+    return rec;
   });
 }
 

@@ -6,7 +6,7 @@ import {
   GAME_REACHED_COST,
   SHAPE_STRAINS, STRAIN_DISPLAY,
   suitLen, isMajor, hcpDev, shapePenalty, deduct, scored,
-  isGameLevel, scoreGenericRebid, rebidCandidates,
+  isGameLevel, scoreGenericRebid, rebidCandidates, minBidLevel,
 } from './rebid-shared.js';
 import { SEATS } from '../model/deal.js';
 import {
@@ -34,6 +34,7 @@ import {
 const CONT_PARTNER = { N: 'S', S: 'N', E: 'W', W: 'E' };
 
 const CONT_COMBINED_GAME = 25;
+const CONT_COMBINED_MINOR_GAME = 29;
 const CONT_COMBINED_SLAM = 33;
 const CONT_FIT_SUPPORT = 3;
 const CONT_OWN_SUIT = 6;
@@ -43,6 +44,12 @@ const CONT_SLAM_PASS_COST = 3;
 const CONT_ABOVE_GAME_COST = 5;
 const CONT_FIT_GAME_BONUS = 3;
 const CONT_LOW_LEVEL_GAME_COST = 3;
+
+/** Combined-point threshold for game in the given strain (29 for minors, 25 otherwise). */
+function contGameThreshold(strain) {
+  if (!strain || strain === Strain.NOTRUMP || isMajor(strain)) return CONT_COMBINED_GAME;
+  return CONT_COMBINED_MINOR_GAME;
+}
 
 /**
  * Score bids for a player on their third or later turn.
@@ -72,13 +79,38 @@ export function getContinuationBids(hand, eval_, auction, seat) {
   const last = lastContractBid(auction);
   const currentLevel = last ? last.level : 0;
 
+  const ownBidCounts = contOwnBidCounts(auction, seat);
   const candidates = rebidCandidates(auction);
   /** @type {BidRecommendation[]} */
   const results = [];
   for (const bid of candidates) {
     results.push(contScore(bid, hand, eval_, partnerLast, ownLast,
-      forcing, fitStrain, combinedMin, combinedMax, pSuits, pfloor, currentLevel));
+      forcing, fitStrain, combinedMin, combinedMax, pSuits, pfloor, currentLevel, last, ownBidCounts));
   }
+
+  // B-51: If all non-pass bids are very low confidence (priority ≤ 2),
+  // boost pass to prevent selecting dubious new-suit continuations.
+  // Skip when pass is deeply negative (forcing auction) — the forced-bid
+  // obligation is legitimate.
+  let bestNonPassPriority = -Infinity;
+  let passIdx = -1;
+  for (let i = 0; i < results.length; i++) {
+    if (results[i].bid.type === 'pass') {
+      passIdx = i;
+    } else {
+      bestNonPassPriority = Math.max(bestNonPassPriority, results[i].priority);
+    }
+  }
+  if (passIdx >= 0 && bestNonPassPriority <= 2 &&
+      results[passIdx].priority >= -2 &&
+      results[passIdx].priority < bestNonPassPriority) {
+    results[passIdx] = {
+      ...results[passIdx],
+      priority: bestNonPassPriority + 1,
+      explanation: results[passIdx].explanation + ' (low-confidence alternatives: prefer settling)',
+    };
+  }
+
   return results.sort((a, b) => b.priority - a.priority);
 }
 
@@ -242,6 +274,137 @@ function contPartnerSuits(auction, seat) {
   return suits;
 }
 
+/**
+ * Find partner's second-to-last contract bid. Used to detect gradual
+ * escalation (1♦→2♦→3♦) vs actual jumps in partner range estimation.
+ * @param {Auction} auction
+ * @param {import('../model/deal.js').Seat} seat
+ * @returns {ContractBid | null}
+ */
+function contFindPartnerPrevBid(auction, seat) {
+  const partner = CONT_PARTNER[seat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  let count = 0;
+  for (let i = auction.bids.length - 1; i >= 0; i--) {
+    const s = SEATS[(dealerIdx + i) % SEATS.length];
+    if (s === partner && auction.bids[i].type === 'contract') {
+      count++;
+      if (count === 2) return /** @type {ContractBid} */ (auction.bids[i]);
+    }
+  }
+  return null;
+}
+
+/**
+ * Count how many times the player has previously bid each strain.
+ * @param {Auction} auction
+ * @param {import('../model/deal.js').Seat} seat
+ * @returns {Map<import('../model/bid.js').Strain, number>}
+ */
+function contOwnBidCounts(auction, seat) {
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  /** @type {Map<import('../model/bid.js').Strain, number>} */
+  const counts = new Map();
+  for (let i = 0; i < auction.bids.length; i++) {
+    const s = SEATS[(dealerIdx + i) % SEATS.length];
+    const b = auction.bids[i];
+    if (s === seat && b.type === 'contract') {
+      const strain = /** @type {ContractBid} */ (b).strain;
+      counts.set(strain, (counts.get(strain) || 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/**
+ * Collect all suit strains this player has bid.
+ * Used to detect preference bids (partner returning to our suit).
+ * @param {Auction} auction
+ * @param {import('../model/deal.js').Seat} seat
+ * @returns {Set<import('../model/bid.js').Strain>}
+ */
+function contCollectOwnSuits(auction, seat) {
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  /** @type {Set<import('../model/bid.js').Strain>} */
+  const suits = new Set();
+  for (let i = 0; i < auction.bids.length; i++) {
+    const s = SEATS[(dealerIdx + i) % SEATS.length];
+    const b = auction.bids[i];
+    if (s === seat && b.type === 'contract' && /** @type {ContractBid} */ (b).strain !== Strain.NOTRUMP) {
+      suits.add(/** @type {ContractBid} */ (b).strain);
+    }
+  }
+  return suits;
+}
+
+/**
+ * B-50: Detect the cheapest level at which partner could have bid their
+ * last strain. Looks at the last opponent contract bid before partner's
+ * most recent action. Returns null if no opponent bid preceded partner's
+ * last bid (i.e. it wasn't a competitive raise).
+ * @param {Auction} auction
+ * @param {import('../model/deal.js').Seat} seat
+ * @returns {number | null}
+ */
+function contDetectCheapestPartnerLevel(auction, seat) {
+  const partner = CONT_PARTNER[seat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+
+  let partnerLastIdx = -1;
+  for (let i = auction.bids.length - 1; i >= 0; i--) {
+    const s = SEATS[(dealerIdx + i) % SEATS.length];
+    if (s === partner && auction.bids[i].type === 'contract') {
+      partnerLastIdx = i;
+      break;
+    }
+  }
+  if (partnerLastIdx < 0) return null;
+  const plb = /** @type {ContractBid} */ (auction.bids[partnerLastIdx]);
+
+  /** @type {ContractBid | null} */
+  let lastOpp = null;
+  for (let i = partnerLastIdx - 1; i >= 0; i--) {
+    const s = SEATS[(dealerIdx + i) % SEATS.length];
+    if (s !== seat && s !== partner && auction.bids[i].type === 'contract') {
+      lastOpp = /** @type {ContractBid} */ (auction.bids[i]);
+      break;
+    }
+  }
+  if (!lastOpp) return null;
+  return STRAIN_ORDER.indexOf(plb.strain) > STRAIN_ORDER.indexOf(lastOpp.strain)
+    ? lastOpp.level : lastOpp.level + 1;
+}
+
+/**
+ * B-49: Detect if partner's first bid was a forced advance of our
+ * takeout double. Returns the opponent bid that was doubled, or null.
+ * @param {Auction} auction
+ * @param {import('../model/deal.js').Seat} seat
+ * @returns {ContractBid | null}
+ */
+function contDetectForcedAdvance(auction, seat) {
+  const partner = CONT_PARTNER[seat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  let weDoubled = false;
+  /** @type {ContractBid | null} */
+  let lastOppContract = null;
+  for (let i = 0; i < auction.bids.length; i++) {
+    const s = SEATS[(dealerIdx + i) % SEATS.length];
+    const b = auction.bids[i];
+    const isOpp = (s !== seat && s !== partner);
+    if (isOpp && b.type === 'contract') {
+      lastOppContract = /** @type {ContractBid} */ (b);
+    }
+    if (s === seat && b.type === 'double' && lastOppContract) {
+      weDoubled = true;
+    }
+    if (weDoubled && s === partner && b.type === 'contract') {
+      return lastOppContract;
+    }
+  }
+  return null;
+}
+
 // ── Partner range estimation ─────────────────────────────────────────
 
 /**
@@ -292,12 +455,32 @@ function contEstimatePartnerRange(auction, seat) {
           isOpener(auction, seat) && level === 2 &&
           (strain === Strain.DIAMONDS || strain === Strain.HEARTS)) {
         range = { min: 0, max: 15 };
+      } else if (ownFirst && ownFirst.level === 2 && ownFirst.strain === Strain.CLUBS &&
+                 isOpener(auction, seat) &&
+                 strain === Strain.DIAMONDS && level === 2) {
+        // B-42: 2♦ waiting response to our 2♣ opening — 0-7 HCP
+        range = { min: 0, max: 7 };
       } else if (ownFirst && ownFirst.strain === strain) {
         range = level <= ownFirst.level + 1 ? { min: 6, max: 10 } : { min: 10, max: 12 };
-      } else if (level >= 2) {
-        range = { min: 10, max: 17 };
       } else {
-        range = { min: 6, max: 17 };
+        // B-49: If partner was forced to advance our takeout double,
+        // their minimum bid could be 0 HCP — don't credit constructive values
+        const doubledBid = contDetectForcedAdvance(auction, seat);
+        if (doubledBid) {
+          const cheapest = STRAIN_ORDER.indexOf(strain) > STRAIN_ORDER.indexOf(doubledBid.strain)
+            ? doubledBid.level : doubledBid.level + 1;
+          if (level <= cheapest) {
+            range = { min: 0, max: 8 };
+          } else if (level === cheapest + 1) {
+            range = { min: 9, max: 11 };
+          } else {
+            range = { min: 12, max: 17 };
+          }
+        } else if (level >= 2) {
+          range = { min: 10, max: 17 };
+        } else {
+          range = { min: 6, max: 17 };
+        }
       }
     }
   }
@@ -323,9 +506,50 @@ function contEstimatePartnerRange(auction, seat) {
   }
 
   const partnerLast = findPartnerLastBid(auction, seat);
+
+  // B-48: Detect preference to our suit — simple preference shows minimum (6-9),
+  // not constructive (10+). A preference bid is when partner returns to one of
+  // our previously bid suits at a cheap level.
+  if (partnerLast && !partnerOpened &&
+      partnerLast.strain !== Strain.NOTRUMP &&
+      partnerLast.strain !== partnerFirst.strain) {
+    const ownSuits = contCollectOwnSuits(auction, seat);
+    if (ownSuits.has(partnerLast.strain)) {
+      const isJump = partnerLast.level >= partnerFirst.level + 2;
+      if (isJump) {
+        range = { min: Math.max(range.min, 10), max: Math.min(range.max, 12) };
+      } else {
+        range = { min: range.min, max: Math.min(range.max, 10) };
+      }
+      range = narrowByPartnerPasses(range, auction, seat);
+      return range;
+    }
+  }
+
+  // B-50: In competitive auctions, detect if partner's latest bid was a
+  // LOTT-competitive raise (cheapest level in the suit over an opponent's bid).
+  // Such raises don't show extras — cap the range.
+  if (partnerLast && partnerLast.strain !== Strain.NOTRUMP &&
+      partnerLast.level > partnerFirst.level) {
+    const ownFirst = findOwnBid(auction, seat);
+    const isRaiseOfAgreedSuit =
+      partnerLast.strain === partnerFirst.strain ||
+      (ownFirst && partnerLast.strain === ownFirst.strain);
+    if (isRaiseOfAgreedSuit) {
+      const cheapest = contDetectCheapestPartnerLevel(auction, seat);
+      if (cheapest !== null && partnerLast.level <= cheapest) {
+        const mid = Math.floor((range.min + range.max) / 2);
+        range = { min: range.min, max: Math.min(range.max, mid + 1) };
+      }
+    }
+  }
+
   if (partnerLast &&
       (partnerLast.level !== partnerFirst.level || partnerLast.strain !== partnerFirst.strain)) {
-    range = narrowByRebid(range, partnerFirst, partnerLast, partnerOpened);
+    const partnerPrev = contFindPartnerPrevBid(auction, seat);
+    const prevLevelInSuit = (partnerPrev && partnerPrev.strain === partnerLast.strain)
+      ? partnerPrev.level : undefined;
+    range = narrowByRebid(range, partnerFirst, partnerLast, partnerOpened, prevLevelInSuit);
   }
 
   range = narrowByPartnerPasses(range, auction, seat);
@@ -465,17 +689,20 @@ function narrowByPartnerJacobyBids(base, auction, seat) {
  * @param {ContractBid} first
  * @param {ContractBid} last
  * @param {boolean} opened
+ * @param {number} [prevLevelInSuit] - Level of partner's second-to-last bid
+ *   in the same suit as `last`, used to detect gradual escalation vs real jumps
  * @returns {{ min: number, max: number }}
  */
-function narrowByRebid(base, first, last, opened) {
+function narrowByRebid(base, first, last, opened, prevLevelInSuit) {
   let { min, max } = base;
+  const jumpRef = prevLevelInSuit !== undefined ? prevLevelInSuit : first.level;
 
   if (opened && first.level === 1 && first.strain !== Strain.NOTRUMP) {
     if (last.strain === Strain.NOTRUMP && last.level === 1) {
       return { min: Math.max(min, 12), max: Math.min(max, 14) };
     }
     if (last.strain === first.strain) {
-      const isJump = last.level >= first.level + 2;
+      const isJump = last.level >= jumpRef + 2;
       if (isJump) return { min: Math.max(min, 17), max };
       return { min, max: Math.min(max, 16) };
     }
@@ -504,7 +731,7 @@ function narrowByRebid(base, first, last, opened) {
       return { min: Math.max(min, 13), max };
     }
     if (last.strain !== Strain.NOTRUMP && last.strain === first.strain) {
-      const isJump = last.level >= first.level + 2;
+      const isJump = last.level >= jumpRef + 2;
       if (isJump) return { min: Math.max(min, 10), max };
       return { min, max: Math.min(max, 10) };
     }
@@ -525,7 +752,7 @@ function narrowByRebid(base, first, last, opened) {
     }
   }
 
-  if (last.level >= first.level + 2 && last.strain === first.strain) {
+  if (last.level >= jumpRef + 2 && last.strain === first.strain) {
     min = Math.max(min, min + 2);
   }
   return { min, max };
@@ -546,10 +773,12 @@ function narrowByRebid(base, first, last, opened) {
  * @param {Set<import('../model/bid.js').Strain>} partnerSuits
  * @param {number} partnershipFloor
  * @param {number} currentLevel
+ * @param {ContractBid | null} lastBid
+ * @param {Map<import('../model/bid.js').Strain, number>} ownBidCounts
  * @returns {BidRecommendation}
  */
 function contScore(bid, hand, eval_, partnerLast, ownLast, forcing,
-    fitStrain, combinedMin, combinedMax, partnerSuits, partnershipFloor, currentLevel) {
+    fitStrain, combinedMin, combinedMax, partnerSuits, partnershipFloor, currentLevel, lastBid, ownBidCounts) {
 
   const gameReached = (partnerLast && isGameLevel(partnerLast)) ||
                       (ownLast && isGameLevel(ownLast));
@@ -559,12 +788,18 @@ function contScore(bid, hand, eval_, partnerLast, ownLast, forcing,
       const effMin = Math.max(combinedMin, partnershipFloor);
       const combinedMid = (effMin + combinedMax) / 2;
       if (combinedMid >= CONT_COMBINED_SLAM) {
-        /** @type {PenaltyItem[]} */
-        const p = [];
-        pen(p, `Combined ~${effMin}-${combinedMax}: slam values, consider exploring`,
-          CONT_SLAM_PASS_COST);
-        return scored(bid, deduct(penTotal(p)),
-          `Game reached but combined ${effMin}-${combinedMax}: slam potential`, p);
+        // B-42: At 5+ level already at/near slam — reduce exploration pressure
+        const slamPen = currentLevel >= 6 ? 0
+                      : currentLevel >= 5 ? 1
+                      : CONT_SLAM_PASS_COST;
+        if (slamPen > 0) {
+          /** @type {PenaltyItem[]} */
+          const p = [];
+          pen(p, `Combined ~${effMin}-${combinedMax}: slam values, consider exploring`,
+            slamPen);
+          return scored(bid, deduct(penTotal(p)),
+            `Game reached but combined ${effMin}-${combinedMax}: slam potential`, p);
+        }
       }
       return scored(bid, deduct(0), 'Game reached: pass');
     }
@@ -574,7 +809,7 @@ function contScore(bid, hand, eval_, partnerLast, ownLast, forcing,
   if (bid.type !== 'contract') return scored(bid, 0, '');
 
   if (gameReached) {
-    return contScoreAboveGame(bid, eval_, combinedMin, combinedMax, partnershipFloor);
+    return contScoreAboveGame(bid, eval_, combinedMin, combinedMax, partnershipFloor, fitStrain, ownLast);
   }
 
   const { strain } = bid;
@@ -583,15 +818,17 @@ function contScore(bid, hand, eval_, partnerLast, ownLast, forcing,
     return contScoreFitBid(bid, eval_, fitStrain, combinedMin, combinedMax, partnershipFloor);
   }
   if (partnerSuits.has(strain) && strain !== Strain.NOTRUMP) {
-    return contScorePreference(bid, eval_, strain, combinedMin, combinedMax, partnershipFloor);
+    return contScorePreference(bid, eval_, strain, combinedMin, combinedMax, partnershipFloor, lastBid,
+      ownBidCounts.get(strain) || 0);
   }
   if (ownLast && strain === ownLast.strain && strain !== Strain.NOTRUMP) {
-    return contScoreRebidOwn(bid, eval_, combinedMin, combinedMax, partnershipFloor);
+    return contScoreRebidOwn(bid, eval_, combinedMin, combinedMax, partnershipFloor, partnerSuits, fitStrain,
+      ownBidCounts.get(strain) || 0);
   }
   if (strain === Strain.NOTRUMP) {
     return contScoreNT(bid, hand, eval_, combinedMin, combinedMax, partnershipFloor);
   }
-  return contScoreNewSuit(bid, eval_, fitStrain, combinedMin);
+  return contScoreNewSuit(bid, eval_, fitStrain, combinedMin, combinedMax, partnershipFloor, ownBidCounts);
 }
 
 // ── Pass ─────────────────────────────────────────────────────────────
@@ -617,8 +854,12 @@ function contScorePass(bid, eval_, partnerLast, forcing, fitStrain,
   const combinedMid = (effMin + combinedMax) / 2;
 
   if (forcing) {
-    pen(p, 'Partner\'s bid is forcing: must respond', FORCING_PASS_COST);
-    return scored(bid, deduct(penTotal(p)), 'Partner\'s bid is forcing: must bid', p);
+    const forcingCost = hcp <= 7
+      ? Math.min(FORCING_PASS_COST, 6 + hcp)
+      : FORCING_PASS_COST;
+    pen(p, 'Partner\'s bid is forcing: must respond', forcingCost);
+    return scored(bid, deduct(penTotal(p)),
+      hcp <= 7 ? `Forcing auction but only ${hcp} HCP: consider settling` : 'Partner\'s bid is forcing: must bid', p);
   }
 
   if (combinedMid >= CONT_COMBINED_SLAM) {
@@ -634,19 +875,20 @@ function contScorePass(bid, eval_, partnerLast, forcing, fitStrain,
       (hcp - 16) * 2);
   }
 
-  if (combinedMid >= CONT_COMBINED_GAME) {
-    const gamePen = Math.min(CONT_GAME_PASS_COST, (combinedMid - CONT_COMBINED_GAME + 1));
-    pen(p, `Combined ~${effMin}-${combinedMax} pts: game values`, gamePen);
+  const gameThreshold = contGameThreshold(fitStrain);
+
+  if (combinedMid >= gameThreshold) {
+    const gamePen = Math.min(CONT_GAME_PASS_COST, (combinedMid - gameThreshold + 1));
+    pen(p, `Combined ~${effMin}-${combinedMax} pts: game values (need ~${gameThreshold})`, gamePen);
     if (fitStrain) {
       pen(p, `Fit in ${STRAIN_DISPLAY[fitStrain]}: should bid game`, CONT_FIT_GAME_BONUS);
-      if (!isMajor(fitStrain)) {
-        pen(p, 'Minor fit with game values: consider 3NT', 2);
-      }
     }
     if (currentLevel <= 2) {
       pen(p, `Only at ${currentLevel}-level with game values`, CONT_LOW_LEVEL_GAME_COST);
     }
-  } else if (combinedMid >= CONT_COMBINED_GAME - 2 && currentLevel <= 2) {
+  } else if (fitStrain && !isMajor(fitStrain) && combinedMid >= CONT_COMBINED_GAME) {
+    pen(p, `Minor fit, combined ~${effMin}-${combinedMax}: consider 3NT`, 2);
+  } else if (combinedMid >= gameThreshold - 2 && currentLevel <= 2) {
     pen(p, `Combined ~${effMin}-${combinedMax}: invitational, only at ${currentLevel}-level`, 2);
     if (fitStrain) pen(p, `Fit in ${STRAIN_DISPLAY[fitStrain]}: consider game try`, 1.5);
   }
@@ -656,7 +898,7 @@ function contScorePass(bid, eval_, partnerLast, forcing, fitStrain,
     expl = `${hcp} HCP: pass (partscore level)`;
   } else if (combinedMid >= CONT_COMBINED_SLAM) {
     expl = `Combined ${effMin}-${combinedMax}: slam potential, consider exploring`;
-  } else if (combinedMid >= CONT_COMBINED_GAME) {
+  } else if (combinedMid >= gameThreshold) {
     expl = `Combined ${effMin}-${combinedMax}: game values, should bid on`;
   } else {
     expl = `${hcp} HCP: pass`;
@@ -671,13 +913,21 @@ function contScorePass(bid, eval_, partnerLast, forcing, fitStrain,
  * @param {Evaluation} eval_
  * @param {number} combinedMin
  * @param {number} combinedMax
+ * @param {number} partnershipFloor
+ * @param {import('../model/bid.js').Strain | null} fitStrain
+ * @param {ContractBid | null} ownLast
  * @returns {BidRecommendation}
  */
-function contScoreAboveGame(bid, eval_, combinedMin, combinedMax, partnershipFloor) {
+function contScoreAboveGame(bid, eval_, combinedMin, combinedMax, partnershipFloor, fitStrain, ownLast) {
   const { level, strain } = /** @type {ContractBid} */ (bid);
   const sym = strain === Strain.NOTRUMP ? 'NT' : STRAIN_SYMBOLS[strain];
   const effMin = Math.max(combinedMin, partnershipFloor);
   const combinedMid = (effMin + combinedMax) / 2;
+
+  // B-42: Distinguish "settling" bids (fit suit, own suit, NT) from new suits
+  const isSettling = (fitStrain && strain === fitStrain) ||
+                     strain === Strain.NOTRUMP ||
+                     (ownLast && strain !== Strain.NOTRUMP && ownLast.strain === strain);
 
   /** @type {PenaltyItem[]} */
   const p = [];
@@ -688,9 +938,13 @@ function contScoreAboveGame(bid, eval_, combinedMin, combinedMax, partnershipFlo
       pen(p, `${level}-level bid carries inherent risk`, (level - 5) * 3);
     }
   } else {
-    // Combined values support slam — penalize 5-level bids that stop short
     if (level === 5) {
       pen(p, `Combined ${effMin}-${combinedMax} with slam values: 5-level is awkward`, 2);
+    }
+    // B-42: Non-settling bids at 6+ with slam values trigger cue-bid runaway
+    if (level >= 6 && !isSettling) {
+      pen(p, `New suit at ${level}-level: settle in agreed strain`,
+        3 + (level - 5) * 3);
     }
   }
   if (level === 7 && combinedMid < 37) {
@@ -722,6 +976,7 @@ function contScoreFitBid(bid, eval_, fitStrain, combinedMin, combinedMax, partne
   const effMin = Math.max(combinedMin, partnershipFloor);
   const combinedMid = (effMin + combinedMax) / 2;
   const gameLevel = isMajor(fitStrain) ? 4 : 5;
+  const gameThreshold = contGameThreshold(fitStrain);
 
   /** @type {PenaltyItem[]} */
   const p = [];
@@ -729,12 +984,16 @@ function contScoreFitBid(bid, eval_, fitStrain, combinedMin, combinedMax, partne
     Math.max(0, CONT_FIT_SUPPORT - support) * LENGTH_SHORT_COST);
 
   if (level === gameLevel) {
-    if (combinedMid < CONT_COMBINED_GAME) {
-      pen(p, `Combined ~${effMin}-${combinedMax}: below game values`,
-        (CONT_COMBINED_GAME - combinedMid) * 0.5);
+    if (combinedMid < gameThreshold) {
+      pen(p, `Combined ~${effMin}-${combinedMax}: below game values (need ~${gameThreshold})`,
+        (gameThreshold - combinedMid) * 0.5);
+    }
+    // B-43: 5-level minor game is inherently risky — prefer doubling or 3NT
+    if (!isMajor(fitStrain)) {
+      pen(p, '5-level minor game: high risk, prefer doubling or 3NT', 2);
     }
     return scored(bid, deduct(penTotal(p)),
-      combinedMid >= CONT_COMBINED_GAME
+      combinedMid >= gameThreshold
         ? `Combined ${effMin}-${combinedMax}, ${support} ${name}: ${level}${sym} game`
         : `${hcp} HCP: ${level}${sym} may be too high`, p);
   }
@@ -750,15 +1009,15 @@ function contScoreFitBid(bid, eval_, fitStrain, combinedMin, combinedMax, partne
       `${hcp} HCP, ${support} ${name}: ${level}${sym}`, p);
   }
 
-  if (combinedMid >= CONT_COMBINED_GAME) {
+  if (combinedMid >= gameThreshold) {
     pen(p, `Combined ${effMin}-${combinedMax}: should bid game`, 4);
-  } else if (combinedMid >= CONT_COMBINED_GAME - 2) {
+  } else if (combinedMid >= gameThreshold - 2) {
     pen(p, `Combined ${effMin}-${combinedMax}: close to game`, 2);
-  } else if (level >= 3 && combinedMid < CONT_COMBINED_GAME - 2) {
+  } else if (level >= 3 && combinedMid < gameThreshold - 2) {
     pen(p, `Combined ~${effMin}-${combinedMax}: below invitational at level ${level}`,
       (level - 2) * 3);
   }
-  const tag = combinedMid >= CONT_COMBINED_GAME - 2 ? 'invitational' : 'competitive';
+  const tag = combinedMid >= gameThreshold - 2 ? 'invitational' : 'competitive';
   return scored(bid, deduct(penTotal(p)),
     `${hcp} HCP, ${support} ${name}: ${level}${sym} (${tag})`, p);
 }
@@ -771,9 +1030,12 @@ function contScoreFitBid(bid, eval_, fitStrain, combinedMin, combinedMax, partne
  * @param {import('../model/bid.js').Strain} strain
  * @param {number} combinedMin
  * @param {number} combinedMax
+ * @param {number} partnershipFloor
+ * @param {ContractBid | null} lastBid
+ * @param {number} priorCount
  * @returns {BidRecommendation}
  */
-function contScorePreference(bid, eval_, strain, combinedMin, combinedMax, partnershipFloor) {
+function contScorePreference(bid, eval_, strain, combinedMin, combinedMax, partnershipFloor, lastBid, priorCount) {
   const { hcp, shape } = eval_;
   const { level } = /** @type {ContractBid} */ (bid);
   const support = suitLen(shape, strain);
@@ -782,6 +1044,7 @@ function contScorePreference(bid, eval_, strain, combinedMin, combinedMax, partn
   const effMin = Math.max(combinedMin, partnershipFloor);
   const combinedMid = (effMin + combinedMax) / 2;
   const gameLevel = strain === Strain.NOTRUMP ? 3 : isMajor(strain) ? 4 : 5;
+  const gameThreshold = contGameThreshold(strain);
 
   /** @type {PenaltyItem[]} */
   const p = [];
@@ -791,11 +1054,23 @@ function contScorePreference(bid, eval_, strain, combinedMin, combinedMax, partn
   } else if (support < CONT_FIT_SUPPORT) {
     pen(p, `Only ${support} ${name}: thin preference`, (CONT_FIT_SUPPORT - support) * 1.5);
   }
-  if (isGameLevel(/** @type {ContractBid} */ (bid)) && combinedMid < CONT_COMBINED_GAME) {
-    pen(p, 'Below game values for this level', 2);
+  if (priorCount >= 1) {
+    pen(p, `Already showed ${name} preference ${priorCount} time${priorCount > 1 ? 's' : ''}: settle`,
+      priorCount * 3);
   }
-  if (level >= 4 && !isGameLevel(/** @type {ContractBid} */ (bid))) {
-    pen(p, `Level ${level}: high for preference`, (level - 3) * 3);
+
+  const cheapest = lastBid ? minBidLevel(strain, lastBid) : level;
+  const jump = level - cheapest;
+  if (jump > 0) {
+    pen(p, `${jump} level${jump > 1 ? 's' : ''} above cheapest preference (${cheapest}${sym})`,
+      jump * 3);
+  }
+  if (level >= 4) {
+    pen(p, `Level ${level}: high for preference`, (level - 3) * 2);
+  }
+  if (isGameLevel(/** @type {ContractBid} */ (bid)) && combinedMid < gameThreshold) {
+    pen(p, `Below game values (need ~${gameThreshold}) for ${level}${sym}`,
+      (gameThreshold - combinedMid) * 0.5);
   }
   if (level > gameLevel && combinedMid < CONT_COMBINED_SLAM) {
     pen(p, `Level ${level}: ${level - gameLevel} above game without slam values`,
@@ -815,9 +1090,13 @@ function contScorePreference(bid, eval_, strain, combinedMin, combinedMax, partn
  * @param {Evaluation} eval_
  * @param {number} combinedMin
  * @param {number} combinedMax
+ * @param {number} partnershipFloor
+ * @param {Set<import('../model/bid.js').Strain>} partnerSuits
+ * @param {import('../model/bid.js').Strain | null} fitStrain
+ * @param {number} priorCount
  * @returns {BidRecommendation}
  */
-function contScoreRebidOwn(bid, eval_, combinedMin, combinedMax, partnershipFloor) {
+function contScoreRebidOwn(bid, eval_, combinedMin, combinedMax, partnershipFloor, partnerSuits, fitStrain, priorCount) {
   const { hcp, shape } = eval_;
   const { level, strain } = /** @type {ContractBid} */ (bid);
   const len = suitLen(shape, strain);
@@ -827,20 +1106,35 @@ function contScoreRebidOwn(bid, eval_, combinedMin, combinedMax, partnershipFloo
   const combinedMid = (effMin + combinedMax) / 2;
   const atGame = isGameLevel(/** @type {ContractBid} */ (bid));
   const gameLevel = isMajor(strain) ? 4 : 5;
+  const gameThreshold = contGameThreshold(strain);
 
   /** @type {PenaltyItem[]} */
   const p = [];
   pen(p, `${len} ${name}, need ${CONT_OWN_SUIT}+`,
     Math.max(0, CONT_OWN_SUIT - len) * LENGTH_SHORT_COST);
 
-  if (atGame && combinedMid < CONT_COMBINED_GAME) {
-    pen(p, `Combined ~${effMin}-${combinedMax}: below game values`,
-      (CONT_COMBINED_GAME - combinedMid) * 0.5);
+  // B-45: Partner showed different suit(s) with no agreed fit — misfit warning
+  const misfit = partnerSuits.size > 0 && !fitStrain && !partnerSuits.has(strain);
+  if (misfit && level >= 3) {
+    pen(p, 'No fit with partner\'s suit: misfit risk', (level - 2) * 2);
   }
-  if (!atGame && level < gameLevel && combinedMid >= CONT_COMBINED_GAME) {
+  if (priorCount >= 2) {
+    pen(p, `Already bid ${name} ${priorCount} times: repeated rebids don't add information`,
+      (priorCount - 1) * 3);
+  }
+
+  if (atGame && combinedMid < gameThreshold) {
+    const shortfall = gameThreshold - combinedMid;
+    pen(p, `Combined ~${effMin}-${combinedMax}: below game values (need ~${gameThreshold})`,
+      shortfall * 0.75);
+    if (!isMajor(strain) && shortfall >= 5) {
+      pen(p, '5-level minor game requires near-game values', 2);
+    }
+  }
+  if (!atGame && level < gameLevel && combinedMid >= gameThreshold) {
     pen(p, `Combined ${effMin}-${combinedMax}: should bid game`, 3);
   }
-  if (!atGame && level < gameLevel && combinedMid < CONT_COMBINED_GAME && level >= 3) {
+  if (!atGame && level < gameLevel && combinedMid < gameThreshold && level >= 3) {
     pen(p, `Level ${level} without game values`,
       (level - 2) * 2.5);
   }
@@ -880,6 +1174,9 @@ function contScoreNT(bid, _hand, eval_, combinedMin, combinedMax, partnershipFlo
     if (combinedMid >= CONT_COMBINED_GAME) {
       if (shapeClass === 'semi-balanced') pen(p, `${shapeClass}: not ideal for NT`, 2);
       else if (shapeClass === 'unbalanced') pen(p, `${shapeClass}: risky for NT game`, 4);
+      if (hcp < 10) {
+        pen(p, `Weak hand (${hcp} HCP): prefer cheaper bid over 3NT`, (10 - hcp) * 1.0);
+      }
     } else {
       pen(p, `${shapeClass} (prefer balanced)`, shapePenalty(shapeClass));
       pen(p, `Combined ~${effMin}-${combinedMax}: below game values`,
@@ -919,14 +1216,19 @@ function contScoreNT(bid, _hand, eval_, combinedMin, combinedMax, partnershipFlo
  * @param {Evaluation} eval_
  * @param {import('../model/bid.js').Strain | null} fitStrain
  * @param {number} combinedMin
+ * @param {number} combinedMax
+ * @param {number} partnershipFloor
+ * @param {Map<import('../model/bid.js').Strain, number>} ownBidCounts
  * @returns {BidRecommendation}
  */
-function contScoreNewSuit(bid, eval_, fitStrain, combinedMin) {
+function contScoreNewSuit(bid, eval_, fitStrain, combinedMin, combinedMax, partnershipFloor, ownBidCounts) {
   const { hcp, shape } = eval_;
   const { level, strain } = /** @type {ContractBid} */ (bid);
   const len = suitLen(shape, strain);
   const sym = STRAIN_SYMBOLS[strain];
   const name = STRAIN_DISPLAY[strain];
+  const effMin = Math.max(combinedMin, partnershipFloor);
+  const combinedMid = (effMin + combinedMax) / 2;
 
   /** @type {PenaltyItem[]} */
   const p = [];
@@ -940,6 +1242,20 @@ function contScoreNewSuit(bid, eval_, fitStrain, combinedMin) {
   }
   if (level >= 4) {
     pen(p, `Level ${level}: very high for a new suit`, (level - 3) * 3);
+  }
+
+  // B-51: Penalty for introducing yet another new suit when already showed 2+ suits
+  const ownSuitCount = ownBidCounts.size;
+  const priorInStrain = ownBidCounts.get(strain) || 0;
+  if (ownSuitCount >= 2 && priorInStrain === 0) {
+    pen(p, `Already showed ${ownSuitCount} suits: introducing another escalates auction`,
+      (ownSuitCount - 1) * 3);
+  }
+
+  // B-51: Penalty when combined values don't justify this level
+  if (level >= 3 && combinedMid < CONT_COMBINED_GAME) {
+    pen(p, `Combined ~${effMin}-${Math.round(combinedMax)}: insufficient for ${level}-level new suit`,
+      Math.min(5, (CONT_COMBINED_GAME - combinedMid) * 0.5));
   }
 
   return scored(bid, deduct(penTotal(p)),

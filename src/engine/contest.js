@@ -46,6 +46,7 @@ const GAME_ESTABLISHED_PASS_COST = 6;
 const GAME_ESTABLISHED_DBL_BONUS = 4;
 
 const COMBINED_GAME_MIN = 25;
+const COMBINED_MINOR_GAME_MIN = 29;
 const COMBINED_PARTSCORE_MIN = 20;
 const FORCING_PASS_COST = 12;
 
@@ -64,6 +65,12 @@ const STRAIN_DISPLAY = {
 
 /** @type {Readonly<Record<Seat, Seat>>} */
 const PARTNER_SEAT = { N: 'S', S: 'N', E: 'W', W: 'E' };
+
+/** Combined-point threshold for game in the given strain (29 for minors, 25 otherwise). */
+function contestGameThreshold(strain) {
+  if (!strain || strain === Strain.NOTRUMP || isMajor(strain)) return COMBINED_GAME_MIN;
+  return COMBINED_MINOR_GAME_MIN;
+}
 
 // ═════════════════════════════════════════════════════════════════════
 // ENTRY POINT
@@ -315,8 +322,12 @@ function scoreContestPass(bid, eval_, oppBid, fitInfo, combinedMin, combinedMax,
         Math.min(3, (safeLevel - oppBid.level + 1)));
     }
 
-    if (effMid >= COMBINED_GAME_MIN && !gameWasReached) {
-      const fitGamePen = DONT_SELL_OUT_COST + 2 + (oppBid.level >= 3 ? 2 : 0);
+    const fitGameMin = contestGameThreshold(fitInfo.strain);
+    if (effMid >= fitGameMin && !gameWasReached) {
+      // B-44: Scale down pressure when competing requires game-level bid
+      const gameLevel = isMajor(fitInfo.strain) ? 4 : 5;
+      const levelsToGame = Math.max(0, gameLevel - oppBid.level - 1);
+      const fitGamePen = DONT_SELL_OUT_COST + Math.min(levelsToGame * 2, 4);
       pen(p, `Combined ${effMin}-${combinedMax} pts with fit: don't sell out`,
         fitGamePen);
     }
@@ -331,7 +342,8 @@ function scoreContestPass(bid, eval_, oppBid, fitInfo, combinedMin, combinedMax,
 
   if (!gameWasReached) {
     if (effMid >= COMBINED_GAME_MIN) {
-      const levelScale = oppBid.level >= 3 ? 1.5 : 1;
+      // B-44: Reduce pressure at 4+ level where competing means bidding game
+      const levelScale = oppBid.level >= 4 ? 0.5 : oppBid.level >= 3 ? 1 : 1;
       pen(p, `Combined ${effMin}-${combinedMax} pts: game values, consider acting`,
         Math.min(DONT_SELL_OUT_COST + 3, (effMid - COMBINED_GAME_MIN + 1) * levelScale));
     } else if (combinedMax >= COMBINED_PARTSCORE_MIN) {
@@ -401,9 +413,11 @@ function scoreContestRaise(bid, eval_, oppBid, fitInfo, combinedMin, combinedMax
     pen(p, `${level}-level: slam territory`, (level - 5) * FIVE_LEVEL_COST);
   }
 
-  if (level >= gameLevel && combinedMin < COMBINED_GAME_MIN) {
-    pen(p, `Combined ~${combinedMin} pts: below game values (${COMBINED_GAME_MIN})`,
-      Math.max(0, COMBINED_GAME_MIN - combinedMin) * 0.5);
+  const raiseGameThreshold = contestGameThreshold(strain);
+  if (level >= gameLevel && combinedMin < raiseGameThreshold) {
+    // B-43/B-44: Steeper shortfall penalty — 0.75 per point below game threshold
+    pen(p, `Combined ~${combinedMin} pts: below game values (need ~${raiseGameThreshold})`,
+      Math.max(0, raiseGameThreshold - combinedMin) * 0.75);
   }
 
   let expl;
@@ -411,7 +425,7 @@ function scoreContestRaise(bid, eval_, oppBid, fitInfo, combinedMin, combinedMax
     expl = `${totalFit}-card ${name} fit: compete to ${level}${sym} (LOTT safe)`;
   } else if (level <= safeLevel) {
     expl = `${totalFit}-card ${name} fit: ${level}${sym} (LOTT)`;
-  } else if (level >= gameLevel && combinedMax >= COMBINED_GAME_MIN) {
+  } else if (level >= gameLevel && combinedMax >= raiseGameThreshold) {
     expl = `Combined values for game: bid ${level}${sym}`;
   } else {
     expl = `${level}${sym}: above safe competitive level`;
@@ -790,6 +804,28 @@ function estimatePartnerRange(auction, seat) {
     }
   }
 
+  // B-50: If partner's latest bid is a competitive raise of our agreed suit,
+  // check whether it was at the cheapest available level (LOTT-competitive,
+  // no extras) or a genuine jump (invitational, showing extras).
+  // A LOTT-competitive raise doesn't promise values above the initial action.
+  const partnerLast = findPartnerLastBid(auction, seat);
+  if (partnerLast && partnerLast.strain !== Strain.NOTRUMP &&
+      partnerLast.level > partnerBid.level) {
+    const isRaiseOfAgreedSuit =
+      partnerLast.strain === partnerBid.strain ||
+      (findOwnBid(auction, seat) && findOwnBid(auction, seat).strain === partnerLast.strain);
+    if (isRaiseOfAgreedSuit) {
+      const cheapestLevel = detectCheapestRaiseLevel(auction, seat);
+      const isCompetitiveRaise = cheapestLevel !== null && partnerLast.level <= cheapestLevel;
+      if (isCompetitiveRaise) {
+        // LOTT-competitive raise: partner just competed to the cheapest level.
+        // Don't credit extra values — cap the max at the low end of the range.
+        const mid = Math.floor((range.min + range.max) / 2);
+        range = { min: range.min, max: Math.min(range.max, mid + 1) };
+      }
+    }
+  }
+
   const passes = partnerPassCount(auction, seat);
   if (passes > 0) {
     const reduction = passes * 2;
@@ -797,6 +833,51 @@ function estimatePartnerRange(auction, seat) {
   }
 
   return range;
+}
+
+/**
+ * B-50: Detect the cheapest level at which partner could bid their last
+ * strain. If the last opponent contract bid before partner's action was at
+ * level N in a lower-ranking strain, cheapest is N; if higher-ranking,
+ * cheapest is N+1. Returns null if no opponent bid was found before
+ * partner's last action (i.e. it wasn't a competitive raise).
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {number | null}
+ */
+function detectCheapestRaiseLevel(auction, seat) {
+  const partner = PARTNER_SEAT[seat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+
+  // Find partner's last contract bid index
+  let partnerLastIdx = -1;
+  for (let i = auction.bids.length - 1; i >= 0; i--) {
+    const s = SEATS[(dealerIdx + i) % SEATS.length];
+    if (s === partner && auction.bids[i].type === 'contract') {
+      partnerLastIdx = i;
+      break;
+    }
+  }
+  if (partnerLastIdx < 0) return null;
+  const partnerLastBid = /** @type {ContractBid} */ (auction.bids[partnerLastIdx]);
+
+  // Find the last opponent contract bid before partner's last bid
+  /** @type {ContractBid | null} */
+  let lastOppBefore = null;
+  for (let i = partnerLastIdx - 1; i >= 0; i--) {
+    const s = SEATS[(dealerIdx + i) % SEATS.length];
+    if (s !== seat && s !== partner && auction.bids[i].type === 'contract') {
+      lastOppBefore = /** @type {ContractBid} */ (auction.bids[i]);
+      break;
+    }
+  }
+  if (!lastOppBefore) return null;
+
+  // Cheapest level for partner's strain over that opponent bid
+  if (STRAIN_ORDER.indexOf(partnerLastBid.strain) > STRAIN_ORDER.indexOf(lastOppBefore.strain)) {
+    return lastOppBefore.level;
+  }
+  return lastOppBefore.level + 1;
 }
 
 /**

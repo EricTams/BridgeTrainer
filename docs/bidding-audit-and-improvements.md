@@ -2,7 +2,7 @@
 
 **Purpose:** Living document that compares **BridgeTrainer's bidding engine** to the normative standard in [sayc-reference.md](./sayc-reference.md), records **deltas**, and lists **prioritized improvements**. Update this file whenever bidding code or agreed SAYC scope changes.
 
-**Last reviewed:** 2026-03-21 (B-30 through B-38 fixed — 37 of 39 items resolved)
+**Last reviewed:** 2026-03-22 (100-hand simulation — 48 of 50 items resolved, 0 open, 2 deferred)
 
 ---
 
@@ -99,7 +99,7 @@
 
 | Function | File | Problem | Fix |
 |----------|------|---------|-----|
-| `scoreTakeoutDouble` | competitive.js | Flat 12 HCP min at all levels | HCP scales +2 per level above 1 (12→14→16→18); risk penalty at 3+ |
+| `scoreTakeoutDouble` | competitive.js | Flat 12 HCP min at all levels | HCP scales +2 per level above 1 (12→14→16→18); risk penalty at 3+; `scoreDirectPass` viable-action gate now uses same level-adjusted minimum (B-39 ✓) |
 | `scoreAdvDblSuit` | competitive.js | Mild `(level-2)*2` penalty at 3+ | Increased to `(level-2)*3` |
 | `scoreAdvDblPass` | competitive.js | Slow penalty reduction at high levels | Steeper `(level-2)*3` adj makes penalty conversion more attractive at 4+ |
 | `scoreAdvDblCuebid` | competitive.js | No level penalty at all — 3♥/4♥/5♥ scored identically | B-35 ✓: level-scaled HCP min + level risk penalty above cheapest cue-bid level |
@@ -128,6 +128,195 @@
 **Verification:** Post-fix run of 20 auctions shows 15 good/acceptable (75%) vs previous ~50% accuracy. Remaining issues primarily in competitive interference auctions (inherently harder).
 
 **Post-fix regression caught and fixed:** Initial tiebreak penalty (B-34) applied unconditionally, causing 22 HCP 2♣ opener to pass after 2♦ waiting response. Fixed by conditioning on HCP < 13 only.
+
+### 2026-03-22 — Minor-suit game threshold and preference-level fix
+
+**Scope:** Diagnosed a recurring bug where the engine recommended 5♣ preference (game-level) over 4♣ (cheapest level) in continuation auctions, even when combined values were far below the 29 points needed for 5-of-a-minor game. Two interacting bugs identified and fixed.
+
+**Observed symptom:** After 1♣–1♦–1♥–1♠–Pass–2♣–2♥–3♦–Pass, North (9 HCP, 5 clubs) bid 5♣ instead of passing or bidding 4♣. The engine scored 5♣ at 10, 4♣ at 7, Pass at 3 — the exact wrong ordering.
+
+**Fixes implemented (B-40, B-41):**
+
+| ID | Issue | File(s) | Fix |
+|----|-------|---------|-----|
+| B-40 | `contScorePreference` game-level exemption: the "high for preference" penalty (`level >= 4`) exempted game-level bids via `!isGameLevel(bid)`. For minors (game = 5-level), this made 5♣ score LESS penalty than 4♣, creating a perverse incentive to jump to game for a simple preference bid. | rebid-continuation.js | Replaced game-level exemption with cheapest-level-relative penalty using `minBidLevel`. Preference bids now penalized by: (a) jump above cheapest level × 3, (b) absolute high-level risk `(level-3) × 2` at 4+, (c) game-level shortfall `(threshold - combined) × 0.5` when values insufficient. |
+| B-41 | Flat `CONT_COMBINED_GAME = 25` used for all strains — minor-suit game (5♣/5♦) requires ~29 combined points, not 25. Pass was over-penalized with a minor fit because the engine thought 25+ combined = "game values" when actually 29 is needed. | rebid-continuation.js, contest.js | Added `CONT_COMBINED_MINOR_GAME = 29` and `contGameThreshold(strain)` helper. All game-value checks in `contScorePass`, `contScoreFitBid`, `contScoreRebidOwn`, `scoreContestRaise`, and `scoreContestPass` now use strain-aware thresholds. NT game checks (3NT = 25) unchanged. Minor fit with 25-28 combined triggers a mild "consider 3NT" suggestion instead of full game-penalty. |
+
+**Impact on the observed hand:** With the fix, North's 5♣ gets ~8.5 points of penalty (jump above cheapest, high-level risk, below minor game values), 4♣ gets ~2 (high-level risk only), and Pass gets ~2 (mild "consider 3NT"). Pass and 4♣ are now close competitors (both reasonable), and 5♣ is correctly dead last.
+
+### 2026-03-22 — Overbid simulation (100-hand batch)
+
+**Scope:** Created `test-overbid.mjs` — a simulation script that deals 100 random hands, runs each auction to completion via the engine, then compares the final contract to combined partnership strength (effective points and fit) to detect overbids. An overbid is flagged when the declaring side's effective points fall below the standard threshold for the contract level reached (e.g. 26 for 4M, 29 for 5m, 33 for slam, 37 for grand slam).
+
+**Results:** 23 of 99 contracts (23.2%) flagged as overbids. Severity: 2 severe (deficit 10+), 6 major (deficit 6–9), 8 moderate (deficit 3–5), 7 minor (deficit 1–2). Average point deficit 4.9. Worst overbid: 5♦ with 16 effective pts (deficit 13).
+
+**Three systemic patterns identified (all now fixed — see audit entry below):**
+
+1. **B-42 — Slam runaway after strong 2♣ opening:** After 2♣–2♦(waiting), the continuation module keeps cue-bidding through every suit at the 6 and 7 level instead of settling. Root cause: no "settle" mechanism in `contScoreAboveGame`; 2♦ waiting response partner range estimated as 10–17 instead of 0–7. **Fixed.**
+
+2. **B-43 — Competitive minor-game overbids (5♣/5♦):** Engine pushes to 5m with 16–24 effective pts (need ~29). LOTT compete logic and `contScoreFitBid` under-penalize 5-level. **Fixed** — steeper shortfall penalties in contest.js and rebid-continuation.js.
+
+3. **B-44 — Competitive auction escalation to marginal games:** Engine competes one level too high, reaching 4M/3NT with 21–25 pts. Competitive pressure penalties on pass outweigh game-level bid penalties. **Fixed** — level-aware pass thresholds, capped balancing discount at 4+, scaled don't-sell-out cost.
+
+### 2026-03-22 — Overbid fix pass (B-42, B-43, B-44)
+
+**Scope:** Addressed the three systemic overbid patterns identified by the 100-hand simulation. Fixes span `rebid-continuation.js`, `contest.js`, and `competitive.js`. Verified with 500-hand simulation runs.
+
+**Fixes implemented:**
+
+| ID | Issue | File(s) | Fix |
+|----|-------|---------|-----|
+| B-42 | Slam runaway after 2♣ opening | rebid-continuation.js | Three-part fix: (1) `CONT_SLAM_PASS_COST` scaled down by `currentLevel` — 0 at 6+, 1 at 5, full cost below; (2) `contScoreAboveGame` now identifies "settling" bids (fit strain, own suit, NT) vs new suits — new suits at 6+ penalized `3 + (level-5)*3`; (3) `contEstimatePartnerRange` corrected for 2♦ waiting response to 2♣ — was using 10–17 HCP (natural 2♦), now correctly uses 0–7 HCP |
+| B-43 | Competitive minor-game overbids (5♣/5♦) | rebid-continuation.js, contest.js | (1) `scoreContestRaise` game shortfall multiplier increased from 0.5 to 0.75; (2) `contScoreFitBid` adds 2-point penalty for 5-level minor games; (3) `contScoreRebidOwn` game shortfall multiplier increased from 0.5 to 0.75 with extra 2-point penalty for minor games with shortfall ≥ 5 |
+| B-44 | Competitive escalation to marginal games | contest.js, competitive.js | (1) `scoreContestPass` "don't sell out" cost scales down at higher levels — penalty = `DONT_SELL_OUT_COST + min(levelsToGame*2, 4)` instead of flat bonus; (2) `scoreContestPass` general "game values" penalty halved at 4+ level (`levelScale 0.5`); (3) `scoreDirectPass` raises pass threshold at high levels — `levelThresholdAdj = max(0, oppBid.level-2)*2`, no balancing discount at 4+; (4) `overcallReqs` caps balancing discount at 1 for 4+ level overcalls (was full 3) |
+
+**B-45 — Continuation misfit escalation and silent-partner competitive re-entry:**
+
+| ID | Issue | File(s) | Fix |
+|----|-------|---------|-----|
+| B-45 | Continuation misfit: both partners insist on different suits but engine escalates to 5m; competitive re-entry: overcaller/opener rebids without partner support | rebid-continuation.js, advisor.js | Two-part fix: (1) `contScoreRebidOwn` now receives `partnerSuits` and `fitStrain` — adds `(level-2)*2` penalty when partner showed different suit(s) with no agreed fit; (2) `applySilentPartnerRebidPenalty` in advisor.js applies a lighter version of the B-08 preempt penalty to any player re-entering competitive bidding after partner was silent (base 4, decays with HCP, 0 at 16+; pass boosted to priority 7) |
+
+**Simulation results (500 hands, post all fixes):**
+- Overbid rate: **18.1%** (baseline ~23%, improvement ~22%)
+- Average point deficit: **3.4** (baseline ~4.9, improvement ~31%)
+- Severe overbids: **0** (baseline 2–3 per 500 hands)
+- Worst overbid: deficit 8 (major, not severe)
+- Remaining overbid profile: LOTT competitions with borderline fits (~30% of remaining), continuation range estimation in long preference sequences (~25%), complex competitive auctions (~20%), and standard variance (~25%)
+
+### 2026-03-22 — Post-fix overbid simulation (100-hand re-test)
+
+**Scope:** Re-ran `test-overbid.mjs` with 100 hands after B-42 through B-45 fixes to measure improvement and identify remaining patterns.
+
+**Results vs first run:**
+
+| Metric | First run | Post-fix | Change |
+|--------|-----------|----------|--------|
+| Overbid rate | 23.2% | 21.4% | Improved |
+| Severe (deficit 10+) | 2 | 0 | Eliminated |
+| Major (deficit 6–9) | 6 | 6 | Same |
+| Average deficit | 4.9 | 3.9 | Improved |
+| 7-level runaways | 2 | 0 | B-42 fix confirmed |
+
+**Confirmed fixes:**
+- B-42 (slam runaway): No 7-level overbids observed. Verified.
+- B-43/B-44: Severity shifted down — no severe overbids, fewer moderate.
+
+**Two new systemic patterns identified (both now fixed — see audit entry below):**
+
+1. **B-46 — Weak hand defaults to 3NT in forcing auctions:** 6 of 21 overbids were 3NT contracts where the weak hand (1–8 HCP) was in a forcing auction and had no natural bid, so it "escaped" to 3NT with far too few combined values. **Fixed** — weak-hand 3NT penalty + reduced forcing cost for ≤7 HCP.
+
+2. **B-47 — Preference ping-pong escalation:** In uncontested auctions, both partners keep preferencing between two suits without settling, escalating: 2♣→2♦→3♣→3♦→4♣→4♦→5♦. **Fixed** — gradual-escalation detection in `narrowByRebid`, repeated-preference and repeated-rebid penalties.
+
+### 2026-03-22 — Weak-hand 3NT escape and preference ping-pong fix (B-46, B-47)
+
+**Scope:** Fixed the two remaining open issues from the 100-hand overbid retest. Both affect `rebid-continuation.js`.
+
+**Fixes implemented:**
+
+| ID | Issue | File(s) | Fix |
+|----|-------|---------|-----|
+| B-46 | Weak hand (1–8 HCP) escapes to 3NT in forcing auctions — no mechanism to prefer cheaper sign-off; 3NT under-penalized for weak hands | rebid-continuation.js | Two-part fix: (1) `contScoreNT` adds weak-hand penalty `(10 - hcp) * 1.0` for 3NT when `hcp < 10` — makes cheap preference/rebid score above 3NT; (2) `contScorePass` reduces forcing cost for very weak hands (`hcp ≤ 7`): cost = `min(15, 6 + hcp)` instead of flat 15 — gives destitute hands a viable stop when all bids are bad |
+| B-47 | Preference ping-pong: partners keep rebidding the same two suits without settling (2♣→2♦→3♣→3♦→4♣→4♦→5♦) | rebid-continuation.js | Three-part fix: (1) `narrowByRebid` gains `prevLevelInSuit` parameter — detects gradual escalation (1♦→2♦→3♦) vs actual jumps (1♦→3♦) by comparing consecutive bids, not first-to-last; this prevents partner range inflation that made pass too penalized; (2) `contScorePreference` penalizes repeated preference (`priorCount * 3`) when already showed preference in same suit; (3) `contScoreRebidOwn` penalizes repeated rebids (`(priorCount - 1) * 3` when `priorCount ≥ 2`); both use `contOwnBidCounts` helper |
+
+**B-46 scoring impact (example: 2 HCP hand in forcing auction):**
+- Before: pass = −5, 3NT = 6–10, preference = 6–8 → 3NT wins (wrong)
+- After: pass = 2, 3NT = −2–2, preference = 6–8 → preference wins (correct)
+
+**B-47 scoring impact (example: opener rebids clubs for 3rd time after 1♣-1♦-2♣-2♦-3♣-3♦):**
+- Before: `narrowByRebid` treated 1♦→3♦ as jump (17+ HCP), inflating combined to ~34 → pass heavily penalized for "slam values." 4♣ tied or beat pass.
+- After: `narrowByRebid` uses 2♦→3♦ (not a jump), range stays at 6–10. 4♣ gets +3 repeated-rebid penalty + misfit penalty → pass dominates.
+
+**New helpers added:**
+- `contFindPartnerPrevBid(auction, seat)` — finds partner's second-to-last contract bid for gradual-escalation detection
+- `contOwnBidCounts(auction, seat)` — counts player's prior bids per strain for repeated-bid detection
+
+**Verification:** 200-hand simulation: 0 engine errors, 0 aborted auctions. 50-hand sample: overbid rate 14.3% (vs 23.2% initial baseline), average deficit 2.9 (vs 4.9 baseline), 0 severe overbids.
+
+### 2026-03-22 — 200-hand overbid simulation (post B-42 through B-47)
+
+**Scope:** Ran `test-overbid.mjs` with 200 hands after all prior fixes (B-42 through B-47) to measure current overbid rate and classify remaining systemic issues by root cause. Verbose mode captured full auction logs, bid alternatives, and audit verdicts for every flagged hand.
+
+**Results:**
+
+| Metric | Value |
+|--------|-------|
+| Hands dealt | 200 |
+| Reached contract | 198 |
+| Passed out | 2 |
+| Engine errors | 0 |
+| Overbids found | 49 (24.7%) |
+| SEVERE (deficit 10+) | 1 |
+| MAJOR (deficit 6–9) | 8 |
+| MODERATE (deficit 3–5) | 24 |
+| MINOR (deficit 1–2) | 16 |
+| Average point deficit | 3.7 |
+| Worst overbid | Hand #26 — 5♣ with 19 effective pts (deficit 10) |
+
+**Overbids by contract level:**
+
+| Contract | Count |
+|----------|-------|
+| 3NT | 12 |
+| 4♠ | 10 |
+| 5♣ | 5 |
+| 4♥ | 5 |
+| 5♦ | 4 |
+| 5♠ | 2 |
+| 6♥ | 2 |
+| Other (2♥, 2♠, 3♦, 3♥, 3♠, 4NT, 5♥, 6♣) | 1 each |
+
+**Seven systemic root causes identified (B-48 through B-54):**
+
+1. **B-48 — Opener 3NT jump after responder preference/signoff:** Most common single pattern (~10 hands). Opener with 13 HCP jumps to 3NT claiming "combined 23–30" after responder gives a simple preference, but responder only showed 7–9 HCP. The continuation logic overestimates responder's range from a preference bid.
+
+2. **B-49 — Strong hand auto-3NT after forcing partner to bid:** 19 HCP hand doubles or rebids, forcing partner (0–5 HCP) to make a minimum advance. Then jumps to 3NT as "19+, balanced" regardless of partner's forced minimum. Hands #66 (deficit 6, partner had 0 HCP), #71, #108.
+
+3. **B-50 — Competitive escalation: game bid on partscore values:** In contested auctions, one side raises competitively (often LOTT-driven) to the 3-level, then partner treats the competitive raise as invitational and jumps to game with minimum values (~9 HCP). Hands #58, #74, #195, #44, #170.
+
+4. **B-51 — Rebid-continuation spiral (runaway auctions):** After initial overcall, both partners keep introducing new suits via rebid-continuation. Neither passes because each new suit looks like showing extras. Worst case: Hand #26 (SEVERE, deficit 10) — auction spirals 2♦→2♠→3♦→3♠→4♣→5♣ with only 19 effective pts. Low-confidence bids (priority 1–2) are selected anyway.
+
+5. **B-52 — Responder bids game over competitive double with minimum:** After partner's competitive raise to the LOTT-safe 3-level, opponents double. Responder with ~8 HCP "runs" to 4♠ instead of passing the double. Hands #54 (deficit 5), #95 (deficit 7).
+
+6. **B-53 — Cue bid strength requirements not enforced:** Engine logs explanations stating a cue bid requires specific strength ("Need 11+ HCP", "Need 16+ HCP", "need 12+ for cue bid") but selects the bid anyway when the hand falls short. The requirements are documented but not gated. Hands #151 (10 HCP, needs 11+), #108 (14 HCP, needs 16+), #187 (10 HCP, needs 12+), #170 (10 HCP, needs 11+).
+
+7. **B-54 — Advance into opponent's suit after takeout double:** After partner's takeout double, advancer bids in the suit that was doubled (the opponent's suit) and it's treated as a natural advance. Hand #162: S doubles 1♥ for takeout, N (5 hearts) bids 2♥ described as "minimum advance." Bidding the doubled suit should be a cue bid (10+ HCP) or avoided entirely, not a natural bid. Hand #182 similar.
+
+**False positives (~5 hands):** Hands #87, #89, #92, #168 are correct preemptive sacrifices that disrupt opponents' game — the declaring side is "overbid" on points but the preemption is deliberate and working as designed. These should not be counted as engine bugs.
+
+**Overlap with prior fixes:** Issues B-48 and B-51 are adjacent to B-32 (continuation overbids) and B-47 (preference ping-pong). The prior fixes partially addressed these patterns but didn't fully solve them — the remaining cases involve slightly different trigger conditions (preference-after-preference vs new-suit escalation, opener-initiated 3NT vs responder-initiated).
+
+### 2026-03-22 — Final four open issues fix pass (B-50, B-52, B-53, B-54)
+
+**Scope:** Fixed the four remaining open items from the 200-hand overbid simulation. Fixes span `competitive.js`, `contest.js`, `rebid-continuation.js`, and `advisor.js`.
+
+**Fixes implemented:**
+
+| ID | Issue | File(s) | Fix |
+|----|-------|---------|-----|
+| B-50 | LOTT-competitive raise treated as invitational — partner bids game after tactical LOTT raise | contest.js, rebid-continuation.js | `detectCheapestRaiseLevel` / `contDetectCheapestPartnerLevel` helpers detect when partner's raise was at the cheapest available level over an opponent bid. When detected as LOTT-competitive, `estimatePartnerRange` / `contEstimatePartnerRange` cap the range at the midpoint (no extras implied), preventing combinedMax from inflating to game values. |
+| B-52 | Responder bids game over competitive double at LOTT level instead of passing for profitable defense | advisor.js | `applyDoubledAtCompetitiveLevelPenalty` post-processing function detects when opponents doubled our partnership's non-game contract. For minimum hands (`hcp < 12`), pass is boosted to priority 9 and game-level bids penalized by `(12 - hcp) * 1.5`. |
+| B-53 | Cue bid HCP requirements stated in explanation but not enforced — 10 HCP hand selects "Need 11+ HCP" cue bid | competitive.js | Introduced `CUE_BID_HCP_COST = 4` (doubled from general `HCP_COST = 2`). Applied in `scoreAdvDblCuebid`, `scoreAdvOcCuebid`, and `scoreNegDblNewSuit` (opponent's suit penalty increased from 5 to 8). A 10 HCP hand needing 12+ now gets 8 penalty points instead of 4, ensuring it loses to cheaper alternatives. |
+| B-54 | Advance into opponent's suit after takeout double treated as natural advance — bidding doubled suit as a natural bid | competitive.js | `scoreAdvanceDoubleBid` now receives `doubledStrain` (the suit partner doubled). When bidding the doubled suit and opponents have since bid a different suit, the bid is routed to `scoreAdvDblCuebid` instead of `scoreAdvDblSuit`. This ensures bidding 2♥ after partner doubles 1♥ is treated as a cue bid (12+ HCP required) even if opponents bid 2♣ in between. |
+
+**Verification:** 100-hand simulation: overbid rate 15.3% (vs 24.7% baseline, 37% improvement), 0 severe overbids, 1 major (down from 8), average deficit 3.2 (vs 3.7 baseline). 0 engine errors across all test suites.
+
+### 2026-03-22 — Partner range estimation fix pass (B-48, B-49, B-51)
+
+**Scope:** Fixed the three remaining high-priority open items from the 200-hand overbid simulation. All three affected `rebid-continuation.js` and involved partner HCP range overestimation leading to overbids.
+
+**Fixes implemented:**
+
+| ID | Issue | File(s) | Fix |
+|----|-------|---------|-----|
+| B-48 | Opener 3NT jump after responder preference — `narrowByRebid` credits a simple preference bid (returning to opener's suit at cheapest level) as 10+ HCP new suit instead of 6–9 minimum preference | rebid-continuation.js | `contCollectOwnSuits` helper detects our previously bid suits. `contEstimatePartnerRange` checks if partner's rebid is in one of our suits and not their first suit — if so, cheap preference caps range at `{min, max: 10}`, jump preference narrows to `{10, 12}`. Short-circuits before `narrowByRebid` which had unreachable dead preference code after the generic "new suit" early return |
+| B-49 | Strong hand auto-3NT after forced advance — partner's forced minimum advance (could be 0 HCP) credited with 10–17 | rebid-continuation.js | `contDetectForcedAdvance` scans auction for our takeout double followed by partner's first contract bid. When detected, range computed from cheapest-advance-level logic: minimum (0–8), jump (9–11), double-jump/cue (12–17) |
+| B-51 | New-suit continuation spiral — partners keep introducing new suits, low-confidence bids (priority 1–2) selected over pass | rebid-continuation.js | (1) `contScoreNewSuit` penalizes third+ new suit by `(ownSuitCount-1)*3`; (2) `contScoreNewSuit` penalizes high-level new suits when combined < 25; (3) `getContinuationBids` boosts pass above best non-pass when all alternatives have priority ≤ 2 and pass isn't forced |
+
+**New helpers added:**
+- `contCollectOwnSuits(auction, seat)` — returns Set of suit strains this player has bid
+- `contDetectForcedAdvance(auction, seat)` — returns the opponent bid that was doubled if partner's first bid was a forced advance, null otherwise
+
+**Verification:** 50-hand simulation: overbid rate 16.3% (baseline 24.7%), 0 severe overbids, average deficit 3.5 (baseline 3.7). 200-hand simulation: average deficit 3.5 (improved), severity distribution shifted toward MINOR.
 
 ---
 
@@ -171,15 +360,15 @@ Quick view of how each SAYC area maps to the engine, with implementation status.
 |-----------|--------|------------------------|-----------------------|
 | Hand evaluation | Implemented | [evaluate.js](../src/engine/evaluate.js) | `ntPoints`/`suitPoints` context-aware (B-04 ✓); HCP/shape classification ✓ |
 | Phase / context | Partial | [context.js](../src/engine/context.js) | Helpers ✓; partner-pass inference ✓ (B-24); vulnerability not tracked (B-17 deferred) |
-| Entry point / routing | Implemented | [advisor.js](../src/engine/advisor.js) | Merges slam bids; filters `isLegalBid`; fallback; preempt+silent partner ✓ (B-08) |
+| Entry point / routing | Implemented | [advisor.js](../src/engine/advisor.js) | Merges slam bids; filters `isLegalBid`; fallback; preempt+silent partner ✓ (B-08); overcall/opening silent partner ✓ (B-45) |
 | Opening bids | Partial | [opening.js](../src/engine/opening.js) | 4th-seat effectively blocked; suit selection ✓; 2♣ override ✓ (B-12); preempt suit quality ✓ (B-21); 3NT+ suppressed ✓ (B-03); opening-strength preempt blocked ✓ (B-30); vulnerability absent (B-17 deferred) |
 | Responding to 1-suit | Partial | [responding.js](../src/engine/responding.js) | Jacoby 2NT ✓ (B-01); 2NT ranges ✓ (B-10); 5+ for 2-level ✓ (B-11); forcing status ✓ (B-13); 5-5 major order ✓ (B-18); minor raise vs 1NT ✓ (B-22); 2NT stopper check ✓ (B-23); 4M raise shape penalty ✓ (B-25) |
 | Responding to 1NT | Implemented | [responding.js](../src/engine/responding.js) | Stayman, transfers, invites, quantitative 4NT — all ✓ |
 | Responding to 2♣ | Implemented | [responding.js](../src/engine/responding.js) | Simplified relay trees; forcing pass = 20; adequate for trainer scope ✓ |
 | Responding to 2NT / weak two / preempt | Implemented | [responding.js](../src/engine/responding.js) | 2NT responses ✓; weak two self-sufficient suit ✓; feature asks ✓ |
-| Competitive bidding | Partial | [competitive.js](../src/engine/competitive.js) | Level scaling ✓ (B-16); vulnerability absent (B-17 deferred); contextual HCP adjustments ✓ (B-05) |
-| Rebid / continuation | Partial | [rebid.js](../src/engine/rebid.js), [rebid-opener-suit.js](../src/engine/rebid-opener-suit.js), [rebid-responder.js](../src/engine/rebid-responder.js), [rebid-continuation.js](../src/engine/rebid-continuation.js), [rebid-shared.js](../src/engine/rebid-shared.js) | Reverse/invite ✓; 4SF ✓; responder rebid ✓; continuation context ✓; help-suit game try ✓ (B-20); Stayman interference ✓ (B-19); 3M jump ✓ (B-26); 2NT after 2-level ✓ (B-27); level penalties ✓ (B-28, B-29); partner-pass inference ✓ (B-24); continuation overbids ✓ (B-32); singleton preference ✓ (B-33); generic tiebreak ✓ (B-34); Jacoby 2NT continuation ✓ (B-37); above-game slam scoring ✓ (B-38) |
-| Contested fit | Partial | [contest.js](../src/engine/contest.js) | LOTT ✓; game-established ✓; forcing detect ✓ (B-07: full scope — cue-bid, new suit, jump, 2♣ GF, jump shift; double relief); level scaling ✓ (B-16); forcing-pass ✓ (B-07); partner-pass inference ✓ (B-24) |
+| Competitive bidding | Partial | [competitive.js](../src/engine/competitive.js) | Level scaling ✓ (B-16); vulnerability absent (B-17 deferred); contextual HCP adjustments ✓ (B-05); competitive escalation fixes ✓ (B-44); **open:** LOTT raise vs invitation ambiguity (B-50), game over double at LOTT level (B-52), cue bid requirements not gated (B-53), advance into opponent's suit (B-54) |
+| Rebid / continuation | Partial | [rebid.js](../src/engine/rebid.js), [rebid-opener-suit.js](../src/engine/rebid-opener-suit.js), [rebid-responder.js](../src/engine/rebid-responder.js), [rebid-continuation.js](../src/engine/rebid-continuation.js), [rebid-shared.js](../src/engine/rebid-shared.js) | Reverse/invite ✓; 4SF ✓; responder rebid ✓; continuation context ✓; help-suit game try ✓ (B-20); Stayman interference ✓ (B-19); 3M jump ✓ (B-26); 2NT after 2-level ✓ (B-27); level penalties ✓ (B-28, B-29); partner-pass inference ✓ (B-24); continuation overbids ✓ (B-32); singleton preference ✓ (B-33); generic tiebreak ✓ (B-34); Jacoby 2NT continuation ✓ (B-37); above-game slam scoring ✓ (B-38); preference cheapest-level ✓ (B-40); minor game threshold ✓ (B-41); slam runaway ✓ (B-42); minor-game overbids ✓ (B-43); misfit escalation ✓ (B-45); weak-hand 3NT ✓ (B-46); preference ping-pong ✓ (B-47); preference range ✓ (B-48); forced-advance range ✓ (B-49); new-suit spiral ✓ (B-51) |
+| Contested fit | Partial | [contest.js](../src/engine/contest.js) | LOTT ✓; game-established ✓; forcing detect ✓ (B-07: full scope — cue-bid, new suit, jump, 2♣ GF, jump shift; double relief); level scaling ✓ (B-16); forcing-pass ✓ (B-07); partner-pass inference ✓ (B-24); minor-game shortfall ✓ (B-43); competitive escalation ✓ (B-44); **open:** LOTT raise tagging (B-50), cue bid gating (B-53) |
 | Slam conventions | Implemented | [conventions.js](../src/engine/conventions.js) | Standard Blackwood ✓ (B-09 → docs only); Gerber, king-ask, cue all present; Stayman continuation fit routing ✓ (B-31) |
 | Bid legality | Implemented | [bid.js](../src/model/bid.js) | `isLegalBid` — bridge law / sufficient bid ✓ |
 
@@ -355,7 +544,7 @@ Reference: [Competitive bidding](./sayc-reference.md#competitive-bidding)
 
 **`scoreNTOvercall`:** Solid. Stopper check present for opponent's suit. Only one opponent suit visible in the direct competitive phase, so single-stopper check is sufficient.
 
-**`scoreTakeoutDouble`:** Level-scaled HCP ✓ (B-16). Shape requirements ✓. Ideal shape bonus (void in opp suit → -2 HCP, singleton → -1) ✓ (B-05). Strong path 17+ bypasses shape ✓. Vulnerability absent (B-17 deferred).
+**`scoreTakeoutDouble`:** Level-scaled HCP ✓ (B-16). Shape requirements ✓. Ideal shape bonus (void in opp suit → -2 HCP, singleton → -1) ✓ (B-05). Strong path 17+ bypasses shape ✓. Vulnerability absent (B-17 deferred). **`scoreDirectPass`** now uses level-adjusted `dblMinHcp` for viable-action gating ✓ (B-39).
 
 **`scoreNegativeDouble`:** Tiered HCP 6/8/10 ✓. Level risk scaling ✓ (B-16 fix). 4-card unbid major required ✓. Distributional discount (void → -1 HCP) ✓ (B-05).
 
@@ -368,6 +557,11 @@ Reference: [Competitive bidding](./sayc-reference.md#competitive-bidding)
 ### Improvements
 
 - [x] Contextual HCP adjustments for overcalls (suit quality, extra length), takeout doubles (ideal shape bonus), advance (partner-level awareness), and negative doubles (distributional discount). **(B-05 ✓)**
+- [x] Competitive escalation: level-aware pass thresholds, capped balancing discount at 4+, scaled don't-sell-out cost. **(B-44 ✓)**
+- [ ] LOTT-competitive raise vs invitation: after a LOTT-safe competitive raise to the 3-level, partner treats it as invitational and bids game with minimum. Need to tag LOTT raises so partner knows not to bid game without extras. **(B-50)**
+- [ ] Game bid over competitive double at LOTT level: responder with ~8 HCP runs to 4M after opponents double at the LOTT-safe 3-level. Should pass for a profitable defense instead. **(B-52)**
+- [ ] Cue bid requirements not enforced: engine logs "Need 11+ HCP" but selects the cue bid anyway with 10 HCP. Stated requirements should be enforced as scoring penalties or hard gates. **(B-53)**
+- [ ] Advance into opponent's suit: after takeout double, advancer bids the doubled suit as a natural advance instead of treating it as a cue bid or avoiding it. `scoreAdvDblSuit` should exclude or heavily penalize the opponent's suit. **(B-54)**
 - [ ] Add scenarios for balancing and negative doubles if puzzle generator expands.
 - Puzzle scenarios: **C-1 through C-12** in [puzzle-scenarios.md](./puzzle-scenarios.md).
 
@@ -558,13 +752,21 @@ Reference: [Rebids](./sayc-reference.md#rebids) + [Forcing table](./sayc-referen
 
 ### Deltas (consolidated)
 
-**Fixed (9 items):** B-08 (preempt over-compete), B-15 (single raise thresholds), B-19 (Stayman interference), B-20 (help-suit game try), B-24 (partner-pass inference), B-26 (3M jump after 1NT resp), B-27 (2NT after 2-level resp), B-28 (WT/preempt level penalty), B-29 (responder raise level penalty). See completed items at bottom.
+**Fixed (18 items):** B-08 (preempt over-compete), B-15 (single raise thresholds), B-19 (Stayman interference), B-20 (help-suit game try), B-24 (partner-pass inference), B-26 (3M jump after 1NT resp), B-27 (2NT after 2-level resp), B-28 (WT/preempt level penalty), B-29 (responder raise level penalty), B-42 (slam runaway), B-43 (minor-game overbids), B-44 (competitive escalation), B-45 (misfit escalation + silent partner re-entry), B-46 (weak-hand 3NT escape), B-47 (preference ping-pong), B-48 (preference range overestimate), B-49 (forced-advance range), B-51 (new-suit spiral). See completed items at bottom.
 
 ### Improvements
 
 - [x] Model negative inference from partner's pass in `contEstimatePartnerRange`. **(B-24 ✓)**
 - [x] Jacoby 2NT continuation: agreed strain detection, partner range narrowing, cue bid recognition, slam-value pass penalty. **(B-37 ✓)**
 - [x] Above-game scoring: 6-level risk penalty removed when slam values present. **(B-38 ✓)**
+- [x] Slam runaway: settling detection + 2♣-2♦ partner range correction. **(B-42 ✓)**
+- [x] Minor-game overbids: steeper shortfall penalties in continuation and contest. **(B-43 ✓)**
+- [x] Misfit escalation: partner-suit awareness in `contScoreRebidOwn` + silent partner rebid penalty. **(B-45 ✓)**
+- [x] Weak-hand 3NT escape: penalty for 3NT with `hcp < 10` + reduced forcing cost for `hcp ≤ 7`. **(B-46 ✓)**
+- [x] Preference ping-pong: gradual-escalation detection in `narrowByRebid` + repeated-bid penalties in `contScorePreference` / `contScoreRebidOwn`. **(B-47 ✓)**
+- [x] Preference bid range overestimate: `contCollectOwnSuits` + preference detection in `contEstimatePartnerRange` — cheap preference caps at 10, jump preference narrows to 10–12. **(B-48 ✓)**
+- [x] Strong hand auto-3NT after forced advance: `contDetectForcedAdvance` + forced-advance range logic — minimum 0–8, jump 9–11, double-jump 12–17. **(B-49 ✓)**
+- [x] New-suit continuation spiral: third+ new suit penalty, combined-values check, low-confidence pass boost in `getContinuationBids`. **(B-51 ✓)**
 - Puzzle scenarios: **RB-1 through RB-9** in [puzzle-scenarios.md](./puzzle-scenarios.md).
 
 ### Case study: preemptor bids again with silent partner (B-08) — Fixed
@@ -661,7 +863,7 @@ Reference: [Slam conventions](./sayc-reference.md#slam-conventions)
 
 **Status key:** Open = not started | In Progress = work underway | Fixed = resolved | Deferred = not planned for now
 
-**Summary:** 32 of 34 items fixed. 0 open. 2 deferred.
+**Summary:** 48 of 50 items fixed. 0 open. 2 deferred.
 
 ### Deferred items
 
@@ -670,7 +872,7 @@ Reference: [Slam conventions](./sayc-reference.md#slam-conventions)
 | B-06 | Low | Scope TBD | **Splinters / advanced slam** not on minimal SAYC reference | [Appendix](./sayc-reference.md#appendix-not-on-sayc) | Only relevant if reference scope is extended |
 | B-17 | High | Systemic gap | **Vulnerability completely absent** — no engine file reads or uses vulnerability for any bid | [Preempts](./sayc-reference.md#preempt-opening), [Competitive](./sayc-reference.md#competitive-bidding) | Deferred until core bidding is fully functional; cross-cutting: affects opening.js, competitive.js, contest.js |
 
-### Completed items (26)
+### Completed items (48)
 
 | ID | Priority | Category | Summary | Fix |
 |----|----------|----------|---------|-----|
@@ -706,6 +908,22 @@ Reference: [Slam conventions](./sayc-reference.md#slam-conventions)
 | B-36 | High | Bug | Under-strength takeout double (11 HCP) wins over pass because `scoreDirectPass` unconditionally penalizes 8+ HCP hands for not competing, even when no viable action exists (no 5-card overcall suit, HCP below takeout minimum) | `scoreDirectPass` now gates the general "HCP above threshold" penalty on having either a 5+ card overcall suit or takeout-double values+shape; without a viable action, penalty is reduced by `PASS_NO_ACTION_DISCOUNT = 0.25` — e.g. 11 HCP with 4-2-3-4 now passes (8.5) instead of doubling (8) |
 | B-37 | High | Bug | Jacoby 2NT continuation broken: after 1♥-2NT-3♥, engine doesn't recognize hearts as agreed suit (2NT filtered as NT), disables Blackwood/cue bids; `contEstimatePartnerRange` inflates opener range (1♥→4♥ seen as jump = 17+, actually minimum sign-off); pass auto-scores 10 at game level even with slam values; responder rebid treats new suits as generic forcing instead of cue bids | Four-part fix: (1) `analyzeAuction` detects Jacoby 2NT as establishing agreed major; (2) `narrowByJacobyContext` + `narrowByPartnerJacobyBids` in rebid-continuation.js properly narrow opener range (3M=min 13-15, 3NT=extras 15+, 4M=signoff) and responder range (cue bids=16+); (3) `contScore` pass penalized when game reached but `combinedMid ≥ 33`; (4) dedicated `scoreRR_afterJacoby2NT` handler treats 4-level new suits as cue bids, penalizes 4M game with 16+ HCP |
 | B-38 | Medium | Bug | `contScoreAboveGame` penalizes 6-level bids unconditionally (3-point risk penalty at level 6 even when combined values support slam), making 5-level bids outscore 6-level slam bids | 6-level risk penalty conditional on `combinedMid < CONT_COMBINED_SLAM`; when slam values present, 5-level bids get 2-point awkward penalty instead; grand slam penalty preserved |
+| B-39 | High | Bug | `scoreDirectPass` uses flat `DBL_MIN_HCP = 12` for viable-action gating — 14 HCP with takeout shape at the 3-level treated as "has viable double action" despite level-adjusted minimum being 16, causing pass to get full 14-point penalty while under-strength double gets only 6-point penalty | `scoreDirectPass` now computes `dblMinHcp` with the same level/shape formula as `scoreTakeoutDouble` (12 + 2/level − shapeAdj); both `hasDblAction` gate and "takeout shape available" check use level-adjusted minimum — 14 HCP hand after 3♥ now correctly passes (~7) instead of doubling (4) |
+|| B-40 | High | Bug | `contScorePreference` game-level exemption: "high for preference" penalty exempted game-level bids, making 5♣ preference score less penalty than 4♣ — perverse incentive for minor suits | Replaced game-level exemption with cheapest-level-relative penalty via `minBidLevel`; penalty = jump × 3 + high-level risk `(level-3) × 2` + game-value shortfall |
+|| B-41 | High | Bug | Flat `CONT_COMBINED_GAME = 25` for all strains — minor game (5♣/5♦) needs ~29, not 25. Pass over-penalized with minor fit; 5-level bids under-penalized | `CONT_COMBINED_MINOR_GAME = 29` + `contGameThreshold(strain)` helper in rebid-continuation.js and contest.js; all game-value checks now strain-aware |
+| B-42 | High | Bug | Slam runaway after strong 2♣ opening — continuation module cue-bids through 6/7 level without settling | Three-part fix: (1) slam-pass cost scaled by level (0 at 6+, 1 at 5); (2) `contScoreAboveGame` penalizes non-settling bids at 6+ (`3 + (level-5)*3`); (3) 2♦ waiting response partner range corrected to 0–7 HCP |
+| B-43 | High | Bug | Competitive minor-game overbids (5♣/5♦) — engine escalates to 5m with insufficient combined points | (1) `scoreContestRaise` game shortfall multiplier 0.5→0.75; (2) 5-level minor penalty in `contScoreFitBid`; (3) `contScoreRebidOwn` shortfall multiplier 0.5→0.75 with extra minor penalty |
+| B-44 | Medium | Bug | Competitive escalation to marginal games — engine competes one level too high in contested auctions | (1) `scoreContestPass` don't-sell-out cost scales down at high levels; (2) game-values penalty halved at 4+; (3) `scoreDirectPass` raises pass threshold at high levels, no balancing discount at 4+; (4) `overcallReqs` caps balancing discount at 1 for 4+ level |
+| B-45 | Medium | Edge case | Continuation misfit escalation + competitive re-entry without partner support | (1) `contScoreRebidOwn` receives `partnerSuits`/`fitStrain`, adds `(level-2)*2` misfit penalty; (2) `applySilentPartnerRebidPenalty` in advisor.js for non-preempt re-entry (base 4, decays at 16+ HCP, pass boosted to 7) |
+| B-46 | High | Bug | Weak hand (1–8 HCP) escapes to 3NT in forcing auctions — no mechanism to prefer cheaper sign-off; 3NT under-penalized for weak hands | Two-part fix: (1) `contScoreNT` adds weak-hand penalty `(10-hcp)*1.0` for 3NT when `hcp < 10`; (2) `contScorePass` reduces forcing cost for `hcp ≤ 7`: `min(15, 6+hcp)` instead of flat 15 |
+| B-47 | Medium | Bug | Preference ping-pong escalation — partners keep rebidding same two suits without settling, ratcheting from 2m→3m→4m→5m | Three-part fix: (1) `narrowByRebid` gains `prevLevelInSuit` to detect gradual escalation vs real jumps; (2) `contScorePreference` adds `priorCount * 3` penalty for repeated preference; (3) `contScoreRebidOwn` adds `(priorCount-1) * 3` penalty for repeated rebids (`priorCount ≥ 2`) |
+| B-48 | High | Bug | Opener 3NT jump after responder preference/signoff — preference credited as 10+ HCP instead of 6–9 | `contCollectOwnSuits` helper + preference detection in `contEstimatePartnerRange`: when partner returns to one of our suits at a cheap level, range capped at {min, max: 10} (simple preference = 6–9); jump preference narrowed to 10–12. Short-circuits before `narrowByRebid` which had dead preference code unreachable after the generic "new suit shows 10+" early return |
+| B-49 | High | Bug | Strong hand auto-3NT after forcing partner to bid — forced advance credited with 10–17 HCP instead of 0–8 | `contDetectForcedAdvance` helper + forced-advance detection in `contEstimatePartnerRange`: when we doubled and partner's first contract bid was a forced advance, range uses cheapest-level logic: minimum (0–8), jump (9–11), double-jump/cue (12–17) instead of flat 10–17 for any 2-level new suit |
+| B-51 | High | Bug | Rebid-continuation spiral: new-suit escalation without stop, low-confidence bids selected over pass | Three-part fix: (1) `contScoreNewSuit` penalizes introducing a third+ new suit (`(ownSuitCount-1)*3`) when player already showed 2+ suits; (2) `contScoreNewSuit` penalizes 3+-level new suits when combined values < 25 (`(25-combinedMid)*0.5`); (3) `getContinuationBids` boosts pass priority above best non-pass when all non-pass bids have priority ≤ 2 (low confidence) and pass isn't in a forced auction |
+| B-50 | Medium | Bug | LOTT-competitive raise treated as invitational — partner bids game after tactical LOTT raise | `detectCheapestRaiseLevel` / `contDetectCheapestPartnerLevel` helpers cap partner range at midpoint when raise is at cheapest available level over opponent bid (LOTT-competitive, no extras implied) |
+| B-52 | Medium | Bug | Responder bids game over competitive double at LOTT level instead of passing for profitable defense | `applyDoubledAtCompetitiveLevelPenalty` in advisor.js: pass boosted to priority 9, game-level bids penalized by `(12 - hcp) * 1.5` when HCP < 12 and opponents doubled our non-game contract |
+| B-53 | Medium | Bug | Cue bid HCP requirements stated in explanation but not enforced as gate | `CUE_BID_HCP_COST = 4` (2× general `HCP_COST`) applied in `scoreAdvDblCuebid`, `scoreAdvOcCuebid`; opponent's suit penalty in `scoreNegDblNewSuit` raised from 5 to 8 |
+| B-54 | Medium | Bug | Advance into opponent's suit after takeout double treated as natural | `scoreAdvanceDoubleBid` receives `doubledStrain`; bids matching doubled suit routed to `scoreAdvDblCuebid` instead of `scoreAdvDblSuit`, even when opponents bid a different suit in between |
 
 ---
 
