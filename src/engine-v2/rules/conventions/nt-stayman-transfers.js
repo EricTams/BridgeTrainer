@@ -1,12 +1,7 @@
 import {
-  classifyAuction,
-  findOwnBid,
-  findPartnerBid,
   findPartnerLastBid,
   hasInterferenceAfterPartner,
-  isOpener,
 } from '../../../engine/context.js';
-import { evaluate } from '../../../engine/evaluate.js';
 import { Strain } from '../../../model/bid.js';
 import { scoreOpenerAfterStayman, scoreResponderAfterStaymanReply } from './stayman.js';
 import {
@@ -15,39 +10,23 @@ import {
   scoreResponderAfterMajorTransferAccepted,
   scoreResponderAfterMinorTransferAccepted,
 } from './transfers.js';
-import {
-  contractCountBySeat,
-  isStaleWindow,
-  transferTargetFromCall,
-} from './shared.js';
+import { transferTargetFromCall } from './shared.js';
+import { shouldUseNTStaymanTransferPack } from './context.js';
 
 /**
- * @typedef {import('../../../model/hand.js').Hand} Hand
- * @typedef {import('../../../model/bid.js').Auction} Auction
- * @typedef {import('../../../model/deal.js').Seat} Seat
+ * @typedef {import('./context.js').ConventionContext} ConventionContext
  * @typedef {import('../../../engine/opening.js').BidRecommendation} BidRecommendation
  */
 
 /**
  * v2 convention pack for 1NT Stayman/transfer families.
- * Returns null when the auction is outside covered windows.
- * @param {Hand} hand
- * @param {Auction} auction
- * @param {Seat} seat
+ * @param {ConventionContext} ctx
  * @returns {BidRecommendation[] | null}
  */
-export function getNTStaymanTransferRuleRecommendations(hand, auction, seat) {
-  const ctx = classifyAuction(auction, seat);
-  if (ctx.phase !== 'rebid' && ctx.phase !== 'responding') return null;
+function runNTStaymanTransferPack(ctx) {
+  if (!shouldUseNTStaymanTransferPack(ctx)) return null;
 
-  const myFirst = findOwnBid(auction, seat);
-  const partnerFirst = findPartnerBid(auction, seat);
-  if (!myFirst || !partnerFirst) return null;
-  if (contractCountBySeat(auction, seat) !== 1) return null;
-  if (isStaleWindow(auction, myFirst, partnerFirst, seat)) return null;
-
-  const eval_ = evaluate(hand);
-  const opener = isOpener(auction, seat);
+  const { auction, seat, eval_, opener, myFirst, partnerFirst } = ctx;
 
   if (opener &&
       myFirst.level === 1 && myFirst.strain === Strain.NOTRUMP &&
@@ -99,4 +78,23 @@ export function getNTStaymanTransferRuleRecommendations(hand, auction, seat) {
   }
 
   return null;
+}
+
+/**
+ * @type {{ id: string, priority: number, when: (ctx: ConventionContext) => boolean, run: (ctx: ConventionContext) => BidRecommendation[] | null }}
+ */
+export const ntStaymanTransferPack = {
+  id: 'nt-stayman-transfers',
+  priority: 100,
+  when: shouldUseNTStaymanTransferPack,
+  run: runNTStaymanTransferPack,
+};
+
+/**
+ * Back-compat callable form used by existing imports/tests.
+ * @param {ConventionContext} ctx
+ * @returns {BidRecommendation[] | null}
+ */
+export function getNTStaymanTransferRuleRecommendations(ctx) {
+  return ntStaymanTransferPack.run(ctx);
 }

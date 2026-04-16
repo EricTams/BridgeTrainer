@@ -1,4 +1,5 @@
-import { getNTStaymanTransferRuleRecommendations } from './nt-stayman-transfers.js';
+import { buildConventionPackContext } from './context.js';
+import { ntStaymanTransferPack } from './nt-stayman-transfers.js';
 
 /**
  * @typedef {import('../../../model/hand.js').Hand} Hand
@@ -7,9 +8,18 @@ import { getNTStaymanTransferRuleRecommendations } from './nt-stayman-transfers.
  * @typedef {import('../../../engine/opening.js').BidRecommendation} BidRecommendation
  */
 
-/** @type {ReadonlyArray<(hand: Hand, auction: Auction, seat: Seat) => BidRecommendation[] | null>} */
+/**
+ * @typedef {{
+ *   id: string,
+ *   priority: number,
+ *   when: (ctx: import('./context.js').ConventionContext) => boolean,
+ *   run: (ctx: import('./context.js').ConventionContext) => BidRecommendation[] | null,
+ * }} ConventionPack
+ */
+
+/** @type {ReadonlyArray<ConventionPack>} */
 const CONVENTION_PACKS = Object.freeze([
-  getNTStaymanTransferRuleRecommendations,
+  ntStaymanTransferPack,
 ]);
 
 /**
@@ -21,8 +31,11 @@ const CONVENTION_PACKS = Object.freeze([
  * @returns {BidRecommendation[] | null}
  */
 export function getConventionRuleRecommendations(hand, auction, seat) {
-  for (const pack of CONVENTION_PACKS) {
-    const result = pack(hand, auction, seat);
+  const ctx = buildConventionPackContext(auction, seat, hand);
+  const ordered = [...CONVENTION_PACKS].sort((a, b) => b.priority - a.priority);
+  for (const pack of ordered) {
+    if (!pack.when(ctx)) continue;
+    const result = pack.run(ctx);
     if (result) return result;
   }
   return null;
