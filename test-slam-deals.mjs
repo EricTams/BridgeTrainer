@@ -251,15 +251,15 @@ const SCENARIOS = [
   },
   {
     id: 'SLAM-GOOD-2',
-    note: 'Strong NS two-way values should still be able to reach slam.',
+    note: 'Strong NS values should still be able to reach 6NT.',
     dealer: 'N',
     targetSide: 'NS',
     expectation: 'reach-slam',
     hands: {
-      N: 'AQ4.AQ4.AQT9.AQJ',
-      E: 'K852.J3.K853.T32',
-      S: '3.KT9876.J64.975',
-      W: 'JT976.52.72.K864',
+      N: 'AQ.AKQJ3.K75.AK4',
+      E: '865.T9.AT83.9852',
+      S: 'J3.654.Q642.QJT6',
+      W: 'KT9742.872.J9.73',
     },
   },
   {
