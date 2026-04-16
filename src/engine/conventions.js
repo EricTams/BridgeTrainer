@@ -2,7 +2,8 @@ import { contractBid, pass, Strain, STRAIN_ORDER, STRAIN_SYMBOLS, lastContractBi
 import { SEATS } from '../model/deal.js';
 import { Rank } from '../model/card.js';
 import { pen, penTotal } from './penalty.js';
-import { firstBidMeaning } from './bid-meaning.js';
+import { firstBidMeaning, firstBidRangeInAuction, applyRebidRangeNarrowing, applyPassRangeNarrowing } from './bid-meaning.js';
+import { findPartnerLastBid, isOpener, partnerPassCount, seatStrengthFloor } from './context.js';
 
 /**
  * @typedef {import('../model/hand.js').Hand} Hand
@@ -36,6 +37,7 @@ const INSUFFICIENT_HCP_COST = 2;
 const NO_ACES_BW_COST = 8;
 const NO_CONTROL_CUE_COST = 8;
 const SLAM_HCP_COST = 2.5;
+const SLAM_MIDPOINT_GAP_COST = 1.5;
 
 // ── SAYC thresholds ─────────────────────────────────────────────────
 
@@ -145,7 +147,10 @@ export function getConventionResponse(hand, _eval, auction, seat) {
  */
 export function getSlamInitiationBids(hand, eval_, auction, seat) {
   const ctx = analyzeAuction(auction, seat);
-  const partnerMin = estimatePartnerMinHCP(ctx);
+  const partnerMin = estimatePartnerFloorHCP(auction, seat, ctx);
+  const partnerRange = estimatePartnerRangeHCP(auction, seat, ctx, partnerMin);
+  const combinedMax = eval_.hcp + partnerRange.max;
+  const combinedMid = (eval_.hcp + partnerMin + combinedMax) / 2;
   const combinedMin = eval_.hcp + partnerMin;
 
   if (combinedMin < CUE_COMBINED_MIN) return [];
@@ -160,7 +165,7 @@ export function getSlamInitiationBids(hand, eval_, auction, seat) {
   if (ctx.agreedStrain) {
     const bw = contractBid(4, Strain.NOTRUMP);
     if (isHigher(bw, last)) {
-      results.push(scoreBlackwoodInit(hand, eval_, ctx.agreedStrain, combinedMin));
+      results.push(scoreBlackwoodInit(hand, eval_, ctx.agreedStrain, combinedMin, combinedMid));
     }
   }
 
@@ -168,7 +173,7 @@ export function getSlamInitiationBids(hand, eval_, auction, seat) {
   if (isPartnerNTContext(ctx)) {
     const gerber = contractBid(4, Strain.CLUBS);
     if (isHigher(gerber, last)) {
-      results.push(scoreGerberInit(eval_, combinedMin));
+      results.push(scoreGerberInit(eval_, combinedMin, combinedMid));
     }
   }
 
@@ -182,7 +187,7 @@ export function getSlamInitiationBids(hand, eval_, auction, seat) {
       if (level > 5) continue;
       const cue = contractBid(level, strain);
       if (isHigher(cue, last)) {
-        results.push(scoreCueBidInit(hand, eval_, cue, strain, ctx.agreedStrain, combinedMin));
+        results.push(scoreCueBidInit(hand, eval_, cue, strain, ctx.agreedStrain, combinedMin, combinedMid));
       }
     }
   }
@@ -190,9 +195,11 @@ export function getSlamInitiationBids(hand, eval_, auction, seat) {
   // Direct slam bids
   const slamStrain = ctx.agreedStrain || Strain.NOTRUMP;
   for (const level of [6, 7]) {
+    const minCombined = level === 7 ? GRAND_COMBINED_MIN : SLAM_COMBINED_MIN;
+    if (combinedMin < minCombined) continue;
     const slam = contractBid(level, slamStrain);
     if (isHigher(slam, last)) {
-      results.push(scoreDirectSlam(eval_, slam, slamStrain, combinedMin, level));
+      results.push(scoreDirectSlam(eval_, slam, slamStrain, combinedMin, combinedMid, level));
     }
   }
 
@@ -591,7 +598,7 @@ function scoreKingCandidate(bid, level, strain, kings, correctStrain, agreedStra
  * @param {number} combinedMin
  * @returns {BidRecommendation}
  */
-function scoreBlackwoodInit(hand, eval_, agreedStrain, combinedMin) {
+function scoreBlackwoodInit(hand, eval_, agreedStrain, combinedMin, combinedMid) {
   const aces = countAces(hand);
   const bid = contractBid(4, Strain.NOTRUMP);
   const agreedName = STRAIN_DISPLAY[agreedStrain];
@@ -601,6 +608,10 @@ function scoreBlackwoodInit(hand, eval_, agreedStrain, combinedMin) {
   if (combinedMin < SLAM_COMBINED_MIN) {
     pen(p, `Combined ${combinedMin}, need ${SLAM_COMBINED_MIN}+`,
       (SLAM_COMBINED_MIN - combinedMin) * INSUFFICIENT_HCP_COST);
+  }
+  if (combinedMid < SLAM_COMBINED_MIN) {
+    pen(p, `Combined midpoint ${combinedMid.toFixed(1)} below slam values`,
+      (SLAM_COMBINED_MIN - combinedMid) * SLAM_MIDPOINT_GAP_COST);
   }
   if (aces === 0) {
     pen(p, 'No aces: dangerous to initiate Blackwood', NO_ACES_BW_COST);
@@ -623,7 +634,7 @@ function scoreBlackwoodInit(hand, eval_, agreedStrain, combinedMin) {
  * @param {number} combinedMin
  * @returns {BidRecommendation}
  */
-function scoreGerberInit(eval_, combinedMin) {
+function scoreGerberInit(eval_, combinedMin, combinedMid) {
   const bid = contractBid(4, Strain.CLUBS);
   /** @type {PenaltyItem[]} */
   const p = [];
@@ -631,6 +642,10 @@ function scoreGerberInit(eval_, combinedMin) {
   if (combinedMin < SLAM_COMBINED_MIN) {
     pen(p, `Combined ${combinedMin}, need ${SLAM_COMBINED_MIN}+`,
       (SLAM_COMBINED_MIN - combinedMin) * INSUFFICIENT_HCP_COST);
+  }
+  if (combinedMid < SLAM_COMBINED_MIN) {
+    pen(p, `Combined midpoint ${combinedMid.toFixed(1)} below slam values`,
+      (SLAM_COMBINED_MIN - combinedMid) * SLAM_MIDPOINT_GAP_COST);
   }
 
   const cSym = STRAIN_SYMBOLS[Strain.CLUBS];
@@ -653,7 +668,7 @@ function scoreGerberInit(eval_, combinedMin) {
  * @param {number} combinedMin
  * @returns {BidRecommendation}
  */
-function scoreCueBidInit(hand, eval_, cueBid, cueSuit, agreedStrain, combinedMin) {
+function scoreCueBidInit(hand, eval_, cueBid, cueSuit, agreedStrain, combinedMin, combinedMid) {
   const hasCtrl = hasFirstRoundControl(hand, cueSuit);
   const { level } = cueBid;
   const sym = STRAIN_SYMBOLS[cueSuit];
@@ -668,6 +683,10 @@ function scoreCueBidInit(hand, eval_, cueBid, cueSuit, agreedStrain, combinedMin
   if (combinedMin < CUE_COMBINED_MIN) {
     pen(p, `Combined ${combinedMin}, need ${CUE_COMBINED_MIN}+`,
       (CUE_COMBINED_MIN - combinedMin) * INSUFFICIENT_HCP_COST);
+  }
+  if (combinedMid < CUE_COMBINED_MIN) {
+    pen(p, `Combined midpoint ${combinedMid.toFixed(1)}: cue bid may be too ambitious`,
+      (CUE_COMBINED_MIN - combinedMid) * 0.75);
   }
 
   let expl;
@@ -690,7 +709,7 @@ function scoreCueBidInit(hand, eval_, cueBid, cueSuit, agreedStrain, combinedMin
  * @param {number} level
  * @returns {BidRecommendation}
  */
-function scoreDirectSlam(eval_, slamBid, slamStrain, combinedMin, level) {
+function scoreDirectSlam(eval_, slamBid, slamStrain, combinedMin, combinedMid, level) {
   const isGrand = level === 7;
   const minCombined = isGrand ? GRAND_COMBINED_MIN : SLAM_COMBINED_MIN;
   const sym = slamStrain === Strain.NOTRUMP ? 'NT' : STRAIN_SYMBOLS[slamStrain];
@@ -700,6 +719,10 @@ function scoreDirectSlam(eval_, slamBid, slamStrain, combinedMin, level) {
   if (combinedMin < minCombined) {
     pen(p, `Combined ${combinedMin}, need ${minCombined}+`,
       (minCombined - combinedMin) * SLAM_HCP_COST);
+  }
+  if (combinedMid < minCombined) {
+    pen(p, `Combined midpoint ${combinedMid.toFixed(1)} below ${level}-level target`,
+      (minCombined - combinedMid) * SLAM_MIDPOINT_GAP_COST);
   }
 
   let expl;
@@ -847,6 +870,51 @@ function estimatePartnerMinHCP(ctx) {
     partnerFirstBid: ctx.myFirstBid,
   });
   return meaning.minHcp;
+}
+
+/**
+ * Estimate a stronger partner floor using auction context.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @param {AuctionAnalysis} ctx
+ * @returns {number}
+ */
+function estimatePartnerFloorHCP(auction, seat, ctx) {
+  const structuralMin = estimatePartnerMinHCP(ctx);
+  const contextualFloor = seatStrengthFloor(auction, PARTNER_SEAT_MAP[seat]);
+  return Math.max(structuralMin, contextualFloor);
+}
+
+/**
+ * Estimate partner range by narrowing first-bid range with rebid/pass inference.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @param {AuctionAnalysis} ctx
+ * @param {number} floorMin
+ * @returns {{ min: number, max: number }}
+ */
+function estimatePartnerRangeHCP(auction, seat, ctx, floorMin) {
+  const partner = PARTNER_SEAT_MAP[seat];
+  if (!ctx.partnerFirstBid) return { min: floorMin, max: floorMin };
+
+  let range = firstBidRangeInAuction(auction, partner);
+  const partnerLast = findPartnerLastBid(auction, seat);
+  if (partnerLast &&
+      (partnerLast.level !== ctx.partnerFirstBid.level || partnerLast.strain !== ctx.partnerFirstBid.strain)) {
+    range = applyRebidRangeNarrowing(
+      range,
+      ctx.partnerFirstBid,
+      partnerLast,
+      isOpener(auction, partner),
+      ctx.partnerFirstBid.strain === partnerLast.strain ? ctx.partnerFirstBid.level : undefined
+    );
+  }
+
+  const passes = partnerPassCount(auction, seat);
+  range = applyPassRangeNarrowing(range, passes);
+  range.min = Math.max(range.min, floorMin);
+  if (range.max < range.min) range.max = range.min;
+  return range;
 }
 
 // ═════════════════════════════════════════════════════════════════════
