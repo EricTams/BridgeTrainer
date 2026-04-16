@@ -9,7 +9,10 @@ import {
 } from './src/model/bid.js';
 import { evaluate } from './src/engine/evaluate.js';
 import { interpretAuctionState } from './src/engine-v2/semantics/interpreter.js';
-import { applyForcingConstraints } from './src/engine-v2/constraints/forcing.js';
+import {
+  applyForcingConstraints,
+  scopeCandidatesByHardObligations,
+} from './src/engine-v2/constraints/forcing.js';
 
 /**
  * @typedef {import('./src/engine/opening.js').BidRecommendation} BidRecommendation
@@ -66,11 +69,12 @@ let failures = 0;
   a = addBid(a, pass());
 
   const m = interpretAuctionState(a, 'N', evaluate(DUMMY_HAND));
-  const scored = applyForcingConstraints([
+  const scoped = scopeCandidatesByHardObligations([
     rec(pass(), 10),
     rec(contractBid(2, Strain.HEARTS), 9),
     rec(contractBid(3, Strain.NOTRUMP), 9.5),
-  ], m).sort((x, y) => y.priority - x.priority);
+  ], m, a);
+  const scored = applyForcingConstraints(scoped, m).sort((x, y) => y.priority - x.priority);
 
   const top = scored[0].bid;
   const topIsHeart = top.type === 'contract' && top.strain === Strain.HEARTS;
@@ -90,11 +94,12 @@ let failures = 0;
   a = addBid(a, pass());
 
   const m = interpretAuctionState(a, 'N', evaluate(DUMMY_HAND));
-  const scored = applyForcingConstraints([
+  const scoped = scopeCandidatesByHardObligations([
     rec(pass(), 10),
     rec(contractBid(2, Strain.DIAMONDS), 8),
     rec(contractBid(2, Strain.NOTRUMP), 9),
-  ], m).sort((x, y) => y.priority - x.priority);
+  ], m, a);
+  const scored = applyForcingConstraints(scoped, m).sort((x, y) => y.priority - x.priority);
 
   const top = scored[0].bid;
   const topIsStaymanReply = top.type === 'contract' &&
@@ -121,11 +126,37 @@ let failures = 0;
   a = addBid(a, pass());                         // W
 
   const m = interpretAuctionState(a, 'N', evaluate(DUMMY_HAND));
-  const hasHardTransfer = m.me.obligations.some(o => o.includes('transfer') && o.includes('hard'));
+  const hasHardTransfer = m.me.obligations.some(o => o.id.includes('transfer') && o.mode === 'hard');
   failures += report(
     'no stale transfer hard obligation after continuation',
     !hasHardTransfer,
-    `unexpected hard transfer obligations still active: ${m.me.obligations.join(',')}`
+    `unexpected hard transfer obligations still active: ${JSON.stringify(m.me.obligations)}`
+  );
+}
+
+// Invariant 4: If scorer emits no hard-obligation class bids, scoping should
+// synthesize legal class candidates.
+{
+  let a = createAuction('N');
+  a = addBid(a, contractBid(1, Strain.NOTRUMP));
+  a = addBid(a, pass());
+  a = addBid(a, contractBid(2, Strain.DIAMONDS));
+  a = addBid(a, pass());
+
+  const m = interpretAuctionState(a, 'N', evaluate(DUMMY_HAND));
+  const scoped = scopeCandidatesByHardObligations([
+    rec(pass(), 10),
+    rec(contractBid(3, Strain.NOTRUMP), 9),
+  ], m, a);
+  const hasGeneratedHeartCompletion = scoped.some(r =>
+    r.bid.type === 'contract' &&
+    r.bid.strain === Strain.HEARTS &&
+    (r.bid.level === 2 || r.bid.level === 3)
+  );
+  failures += report(
+    'obligation scoping generates required class candidates',
+    hasGeneratedHeartCompletion,
+    `expected generated hearts completion candidate, got ${JSON.stringify(scoped)}`
   );
 }
 

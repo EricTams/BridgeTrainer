@@ -9,7 +9,10 @@ import { getCompetitiveBids, getCompetitiveResponseBids, getPostDoubleBids } fro
 import { getConventionResponse, getSlamInitiationBids } from './conventions.js';
 import { getContestBids } from './contest.js';
 import { interpretAuctionState } from '../engine-v2/semantics/interpreter.js';
-import { applyForcingConstraints } from '../engine-v2/constraints/forcing.js';
+import {
+  applyForcingConstraints,
+  scopeCandidatesByHardObligations,
+} from '../engine-v2/constraints/forcing.js';
 
 /**
  * @typedef {import('./opening.js').BidRecommendation} BidRecommendation
@@ -154,11 +157,13 @@ export function getRecommendations(hand, auction, seat) {
   }
 
   results = results.filter(rec => isLegalBid(auction, rec.bid));
+  results = scopeCandidatesByHardObligations(results, v2Meaning, auction);
 
   if (results.length === 0) {
     results = generateFallbackBids(eval_, auction);
   }
 
+  results = scopeCandidatesByHardObligations(results, v2Meaning, auction);
   results = applyForcingConstraints(results, v2Meaning);
 
   return results.sort(bidRecCompare);
