@@ -1,5 +1,6 @@
 import { buildConventionPackContext } from './context.js';
 import { ntStaymanTransferPack } from './nt-stayman-transfers.js';
+import { competitiveNTPenaltyDoublePack } from './competitive-nt-penalty-double.js';
 import { fallbackNoopPack } from './fallback-noop.js';
 
 /**
@@ -21,6 +22,7 @@ import { fallbackNoopPack } from './fallback-noop.js';
 /** @type {ReadonlyArray<ConventionPack>} */
 const CONVENTION_PACKS = Object.freeze([
   ntStaymanTransferPack,
+  competitiveNTPenaltyDoublePack,
   fallbackNoopPack,
 ]);
 

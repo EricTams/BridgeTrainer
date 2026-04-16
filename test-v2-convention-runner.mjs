@@ -10,6 +10,7 @@ import {
 } from './src/model/bid.js';
 import {
   conventionPackCount,
+  conventionPackMeta,
   getConventionRuleRecommendations,
 } from './src/engine-v2/rules/conventions/runner.js';
 
@@ -35,6 +36,38 @@ const STAYMAN_HAND = createHand([
   createCard(Suit.CLUBS, Rank.NINE),
 ]);
 
+const STRONG_BALANCED_HAND = createHand([
+  createCard(Suit.SPADES, Rank.ACE),
+  createCard(Suit.SPADES, Rank.KING),
+  createCard(Suit.SPADES, Rank.QUEEN),
+  createCard(Suit.HEARTS, Rank.KING),
+  createCard(Suit.HEARTS, Rank.JACK),
+  createCard(Suit.HEARTS, Rank.NINE),
+  createCard(Suit.DIAMONDS, Rank.ACE),
+  createCard(Suit.DIAMONDS, Rank.KING),
+  createCard(Suit.DIAMONDS, Rank.TEN),
+  createCard(Suit.CLUBS, Rank.ACE),
+  createCard(Suit.CLUBS, Rank.QUEEN),
+  createCard(Suit.CLUBS, Rank.JACK),
+  createCard(Suit.CLUBS, Rank.EIGHT),
+]);
+
+const WEAK_BALANCED_HAND = createHand([
+  createCard(Suit.SPADES, Rank.QUEEN),
+  createCard(Suit.SPADES, Rank.JACK),
+  createCard(Suit.SPADES, Rank.TEN),
+  createCard(Suit.HEARTS, Rank.JACK),
+  createCard(Suit.HEARTS, Rank.TEN),
+  createCard(Suit.HEARTS, Rank.NINE),
+  createCard(Suit.DIAMONDS, Rank.KING),
+  createCard(Suit.DIAMONDS, Rank.QUEEN),
+  createCard(Suit.DIAMONDS, Rank.TEN),
+  createCard(Suit.CLUBS, Rank.KING),
+  createCard(Suit.CLUBS, Rank.JACK),
+  createCard(Suit.CLUBS, Rank.NINE),
+  createCard(Suit.CLUBS, Rank.EIGHT),
+]);
+
 /**
  * @param {string} name
  * @param {boolean} ok
@@ -55,10 +88,12 @@ let failures = 0;
 // Test 1: registry should include both real pack and fallback noop pack.
 {
   const count = conventionPackCount();
+  const meta = conventionPackMeta();
+  const hasCompetitivePack = meta.some(m => m.id === 'competitive-nt-penalty-double');
   failures += report(
     'registry exposes multiple packs',
-    count >= 2,
-    `expected >=2 packs, got ${count}`,
+    count >= 3 && hasCompetitivePack,
+    `expected >=3 packs and competitive pack present, got count=${count} meta=${JSON.stringify(meta)}`,
   );
 }
 
@@ -96,6 +131,38 @@ let failures = 0;
     'fallback pack remains no-op on unmatched context',
     recs.length === 0,
     `expected null/no recommendations for unmatched context, got ${JSON.stringify(recs[0] || null)}`
+  );
+}
+
+// Test 4: in direct competitive vs 1NT with strong values, pack should prefer penalty double.
+{
+  let auction = createAuction('S');
+  auction = addBid(auction, pass()); // S
+  auction = addBid(auction, contractBid(1, Strain.NOTRUMP)); // W
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // N to act (direct competitive)
+  const recs = getConventionRuleRecommendations(STRONG_BALANCED_HAND, auction, seat) || [];
+  const top = recs[0] || null;
+  const topIsPenaltyDouble = !!top && top.bid.type === 'double';
+  failures += report(
+    'competitive nt penalty-double pack recommends double',
+    topIsPenaltyDouble,
+    `expected top recommendation double, got ${JSON.stringify(top)}`,
+  );
+}
+
+// Test 5: same window with weaker hand should not trigger penalty-double pack.
+{
+  let auction = createAuction('S');
+  auction = addBid(auction, pass()); // S
+  auction = addBid(auction, contractBid(1, Strain.NOTRUMP)); // W
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // N to act (direct competitive)
+  const recs = getConventionRuleRecommendations(WEAK_BALANCED_HAND, auction, seat);
+  failures += report(
+    'competitive nt penalty-double pack is gated by values',
+    recs === null,
+    `expected null for weak hand in same window, got ${JSON.stringify(recs)}`,
   );
 }
 
