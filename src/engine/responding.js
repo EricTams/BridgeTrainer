@@ -561,17 +561,32 @@ function scoreGenericResponse(bid, eval_, ps) {
   const { hcp, shape, shapeClass } = eval_;
   const { level, strain } = /** @type {ContractBid} */ (bid);
   const minHcp = RESP_MIN_HCP + (level - 1) * RESP_HCP_PER_LEVEL;
+  const partnerSupport = suitLen(shape, ps);
 
   /** @type {PenaltyItem[]} */
   const p = [];
   pen(p, `${hcp} HCP, need ${minHcp}+`, Math.max(0, minHcp - hcp) * HCP_COST);
   if (strain === Strain.NOTRUMP) {
     pen(p, `${shapeClass} (need balanced)`, shapePenalty(shapeClass));
+    if (
+      level === 3 &&
+      isMajor(ps) &&
+      partnerSupport >= JACOBY_2NT_MIN_SUPPORT &&
+      hcp >= JACOBY_2NT_MIN_HCP
+    ) {
+      pen(p, `Major fit with game-forcing values: prefer Jacoby 2NT`, MAJOR_FIT_PREF_COST);
+    }
   } else {
     const name = STRAIN_DISPLAY[strain];
     const len = suitLen(shape, strain);
     pen(p, `${len} ${name}, need ${NEW_SUIT_MIN_LEN}+`, Math.max(0, NEW_SUIT_MIN_LEN - len) * LENGTH_SHORT_COST);
-    if (strain === ps) pen(p, `${suitLen(shape, ps)} support, need ${RAISE_MIN_SUPPORT}+`, Math.max(0, RAISE_MIN_SUPPORT - suitLen(shape, ps)) * LENGTH_SHORT_COST);
+    if (strain === ps) {
+      pen(
+        p,
+        `${partnerSupport} support, need ${RAISE_MIN_SUPPORT}+`,
+        Math.max(0, RAISE_MIN_SUPPORT - partnerSupport) * LENGTH_SHORT_COST,
+      );
+    }
   }
 
   return scored(bid, deduct(penTotal(p)), genericRespExpl(hcp, level, strain, minHcp), p);
