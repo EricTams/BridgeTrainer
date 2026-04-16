@@ -1,4 +1,5 @@
-import { contractBid, isLegalBid, Strain } from '../../model/bid.js';
+import { isLegalBid } from '../../model/bid.js';
+import { getObligationRule, parseObligation } from './obligation-rules.js';
 
 /**
  * @typedef {import('../../engine/opening.js').BidRecommendation} BidRecommendation
@@ -81,38 +82,11 @@ function hardObligationValidators(obligations) {
   for (const obligation of obligations) {
     const { id, mode } = parseObligation(obligation);
     if (mode !== 'hard') continue;
-    const validator = validatorForObligation(id);
-    if (validator) validators.push(validator);
+    const rule = getObligationRule(id);
+    if (!rule) continue;
+    validators.push(bid => rule.allowBid(bid));
   }
   return validators;
-}
-
-/**
- * @param {string} id
- * @returns {((bid: BidRecommendation['bid']) => boolean) | null}
- */
-function validatorForObligation(id) {
-  if (id === 'reply-to-stayman') {
-    return bid => bid.type === 'contract' &&
-      bid.level === 2 &&
-      (bid.strain === 'D' || bid.strain === 'H' || bid.strain === 'S');
-  }
-  if (id === 'complete-transfer-hearts') {
-    return bid => bid.type === 'contract' &&
-      bid.strain === 'H' &&
-      (bid.level === 2 || bid.level === 3);
-  }
-  if (id === 'complete-transfer-spades') {
-    return bid => bid.type === 'contract' &&
-      bid.strain === 'S' &&
-      (bid.level === 2 || bid.level === 3);
-  }
-  if (id === 'complete-minor-transfer-clubs') {
-    return bid => bid.type === 'contract' &&
-      bid.level === 3 &&
-      bid.strain === 'C';
-  }
-  return null;
 }
 
 /**
@@ -125,7 +99,10 @@ function generateRequiredCandidates(meaning, auction, validators) {
   const hardIds = hardObligationIds(meaning.me.obligations);
   if (hardIds.length === 0) return [];
 
-  const bids = hardIds.flatMap(obligationBidSet);
+  const bids = hardIds.flatMap(id => {
+    const rule = getObligationRule(id);
+    return rule ? rule.generateBids() : [];
+  });
   const seen = new Set();
   const generated = [];
   for (const bid of bids) {
@@ -152,53 +129,12 @@ function hardObligationIds(obligations) {
   const ids = [];
   for (const obligation of obligations) {
     const parsed = parseObligation(obligation);
-    if (parsed.mode === 'hard') ids.push(parsed.id);
+    if (parsed.mode !== 'hard') continue;
+    const rule = getObligationRule(parsed.id);
+    if (!rule) continue;
+    ids.push(parsed.id);
   }
   return ids;
-}
-
-/**
- * @param {string} id
- * @returns {BidRecommendation['bid'][]}
- */
-function obligationBidSet(id) {
-  if (id === 'reply-to-stayman') {
-    return [
-      contractBid(2, Strain.DIAMONDS),
-      contractBid(2, Strain.HEARTS),
-      contractBid(2, Strain.SPADES),
-    ];
-  }
-  if (id === 'complete-transfer-hearts') {
-    return [contractBid(2, Strain.HEARTS), contractBid(3, Strain.HEARTS)];
-  }
-  if (id === 'complete-transfer-spades') {
-    return [contractBid(2, Strain.SPADES), contractBid(3, Strain.SPADES)];
-  }
-  if (id === 'complete-minor-transfer-clubs') {
-    return [contractBid(3, Strain.CLUBS)];
-  }
-  return [];
-}
-
-/**
- * @param {string | { id: string, mode?: 'hard' | 'soft' }} obligation
- * @returns {{ id: string, mode: 'hard' | 'soft' }}
- */
-function parseObligation(obligation) {
-  if (typeof obligation === 'string') {
-    if (obligation.endsWith('-soft')) {
-      return { id: obligation.slice(0, -5), mode: 'soft' };
-    }
-    if (obligation.endsWith('-hard')) {
-      return { id: obligation.slice(0, -5), mode: 'hard' };
-    }
-    return { id: obligation, mode: 'hard' };
-  }
-  return {
-    id: obligation.id,
-    mode: obligation.mode === 'soft' ? 'soft' : 'hard',
-  };
 }
 
 /**
@@ -218,14 +154,10 @@ function forcingLabels(meaning) {
   const labels = [];
   for (const obligation of meaning.me.obligations) {
     const { id, mode } = parseObligation(obligation);
-    if (id === 'reply-to-stayman' && mode === 'hard') {
-      labels.push('Stayman is forcing: pass not allowed');
-    } else if (mode === 'hard' &&
-      (id === 'complete-transfer-hearts' ||
-       id === 'complete-transfer-spades' ||
-       id === 'complete-minor-transfer-clubs')) {
-      labels.push('Transfer completion required: pass not allowed');
-    }
+    if (mode !== 'hard') continue;
+    const rule = getObligationRule(id);
+    if (!rule) continue;
+    labels.push(rule.passLabel);
   }
   if (labels.length === 0) labels.push('Forcing auction: pass not allowed');
   return labels;
@@ -239,50 +171,15 @@ function forcingLabels(meaning) {
 function obligationViolation(rec, meaning) {
   for (const obligation of meaning.me.obligations) {
     const { id, mode } = parseObligation(obligation);
-    if (id === 'reply-to-stayman' && mode === 'hard') {
-      if (rec.bid.type === 'pass') {
-        return { reason: 'Stayman reply required: cannot pass', hard: true };
-      }
-      if (rec.bid.type !== 'contract') {
-        return { reason: 'Stayman reply requires contract bid', hard: true };
-      }
-      const legal = (
-        (rec.bid.level === 2 && rec.bid.strain === 'D') ||
-        (rec.bid.level === 2 && rec.bid.strain === 'H') ||
-        (rec.bid.level === 2 && rec.bid.strain === 'S')
-      );
-      if (!legal) return { reason: 'Stayman reply must be 2D/2H/2S', hard: true };
-    } else if (id === 'complete-transfer-hearts' && mode === 'hard') {
-      if (rec.bid.type !== 'contract' || rec.bid.strain !== 'H' ||
-          (rec.bid.level !== 2 && rec.bid.level !== 3)) {
-        return { reason: 'Transfer obligation: must bid hearts (2H/3H)', hard: true };
-      }
-    } else if (id === 'complete-transfer-spades' && mode === 'hard') {
-      if (rec.bid.type !== 'contract' || rec.bid.strain !== 'S' ||
-          (rec.bid.level !== 2 && rec.bid.level !== 3)) {
-        return { reason: 'Transfer obligation: must bid spades (2S/3S)', hard: true };
-      }
-    } else if (id === 'complete-minor-transfer-clubs' && mode === 'hard') {
-      if (rec.bid.type !== 'contract' || rec.bid.level !== 3 || rec.bid.strain !== 'C') {
-        return { reason: 'Minor transfer obligation: must bid 3C', hard: true };
-      }
-    } else if (id === 'reply-to-stayman' && mode === 'soft') {
-      if (rec.bid.type === 'pass') {
-        return { reason: 'Stayman continuation usually acts (pass discouraged)', hard: false };
-      }
-    } else if (id === 'complete-transfer-hearts' && mode === 'soft') {
-      if (rec.bid.type === 'pass') {
-        return { reason: 'Transfer continuation usually acts in hearts (pass discouraged)', hard: false };
-      }
-    } else if (id === 'complete-transfer-spades' && mode === 'soft') {
-      if (rec.bid.type === 'pass') {
-        return { reason: 'Transfer continuation usually acts in spades (pass discouraged)', hard: false };
-      }
-    } else if (id === 'complete-minor-transfer-clubs' && mode === 'soft') {
-      if (rec.bid.type === 'pass') {
-        return { reason: 'Minor transfer continuation usually acts (pass discouraged)', hard: false };
-      }
+    const rule = getObligationRule(id);
+    if (!rule) continue;
+    if (mode === 'hard') {
+      const reason = rule.hardViolation(rec.bid);
+      if (reason) return { reason, hard: true };
+      continue;
     }
+    const reason = rule.softViolation(rec.bid);
+    if (reason) return { reason, hard: false };
   }
   return null;
 }
