@@ -45,6 +45,7 @@ const RESP_2NT_MINOR_MAX = 12;
 const JACOBY_2NT_MIN_HCP = 13;
 const JACOBY_2NT_MIN_SUPPORT = 4;
 const JACOBY_2NT_NO_FIT_COST = 10;
+const MAJOR_GAME_PREEMPT_OVER_DOUBLE_MAX_HCP = 7;
 const JUMP_SHIFT_MIN = 19;
 const JUMP_SHIFT_MIN_LEN = 5;
 const GAME_RAISE_MIN_HCP = 5;
@@ -513,6 +514,11 @@ function scoreGameRaise(bid, eval_, ps) {
 
   /** @type {PenaltyItem[]} */
   const p = [];
+  if (hcp <= MAJOR_GAME_PREEMPT_OVER_DOUBLE_MAX_HCP) {
+    pen(p,
+      `${hcp} HCP: preemptive game raise not standard over opponent double`,
+      GAME_RAISE_BALANCED_COST);
+  }
   pen(p, `${hcp} HCP, need ${GAME_RAISE_MIN_HCP}-${GAME_RAISE_MAX_HCP}`,
     hcpDev(hcp, GAME_RAISE_MIN_HCP, GAME_RAISE_MAX_HCP) * HCP_COST);
   pen(p, `${support} ${name}, need ${GAME_RAISE_MIN_SUPPORT}+`,
@@ -527,6 +533,9 @@ function scoreGameRaise(bid, eval_, ps) {
 function gameRaiseExpl(hcp, support, shapeClass, ps) {
   const sym = STRAIN_SYMBOLS[ps];
   const name = STRAIN_DISPLAY[ps];
+  if (hcp <= MAJOR_GAME_PREEMPT_OVER_DOUBLE_MAX_HCP) {
+    return `${hcp} HCP: prefer pass/constructive action over preemptive 4${sym} after double`;
+  }
   if (support < GAME_RAISE_MIN_SUPPORT) return `${support} ${name}: need ${GAME_RAISE_MIN_SUPPORT}+ for preemptive 4${sym}`;
   if (hcp > GAME_RAISE_MAX_HCP) return `${hcp} HCP: too strong for preemptive 4${sym} (use Jacoby 2NT or splinter)`;
   if (hcp < GAME_RAISE_MIN_HCP) return `${hcp} HCP: too weak for 4${sym} (${GAME_RAISE_MIN_HCP}+)`;
