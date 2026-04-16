@@ -1,4 +1,5 @@
 import { Strain } from '../../model/bid.js';
+import { SEATS } from '../../model/deal.js';
 import {
   classifyAuction,
   findOpponentBid,
@@ -108,16 +109,24 @@ function collectObligations(auction, seat, myFirst, partnerFirst) {
   const obligations = [];
   if (!partnerFirst) return obligations;
   if (hasDoubleAfterPartnerBid(auction, seat)) return obligations;
+  const partnerSeat = PARTNER[seat];
+  const partnerFirstIdx = firstContractIndexBySeat(auction, partnerSeat);
+  if (partnerFirstIdx < 0) return obligations;
+  if (firstActionAfterIndex(auction, seat, partnerFirstIdx) >= 0) return obligations;
+  if (hasOpponentContractAfterIndex(auction, seat, partnerFirstIdx)) return obligations;
 
   if (partnerFirst.level === 2 && partnerFirst.strain === Strain.CLUBS &&
-      myFirst && myFirst.level === 1 && myFirst.strain === Strain.NOTRUMP) {
+      myFirst && myFirst.level === 1 && myFirst.strain === Strain.NOTRUMP &&
+      isOpener(auction, seat)) {
     obligations.push('reply-to-stayman');
   }
   if (partnerFirst.level === 2 &&
       (partnerFirst.strain === Strain.DIAMONDS || partnerFirst.strain === Strain.HEARTS) &&
       myFirst && myFirst.level === 1 && myFirst.strain === Strain.NOTRUMP &&
-      !hasInterferenceAfterPartner(auction, seat)) {
-    obligations.push('complete-transfer');
+      isOpener(auction, seat)) {
+    obligations.push(partnerFirst.strain === Strain.DIAMONDS
+      ? 'complete-transfer-hearts'
+      : 'complete-transfer-spades');
   }
   return obligations;
 }
@@ -210,4 +219,50 @@ function detectConventions(myFirst, partnerFirst, opponentFirst, auction, seat) 
     conventions.push('vs-nt-competitive');
   }
   return conventions;
+}
+
+/**
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {number}
+ */
+function firstContractIndexBySeat(auction, seat) {
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  for (let i = 0; i < auction.bids.length; i++) {
+    const bidSeat = SEATS[(dealerIdx + i) % SEATS.length];
+    if (bidSeat === seat && auction.bids[i].type === 'contract') return i;
+  }
+  return -1;
+}
+
+/**
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @param {number} startIdx
+ * @returns {number}
+ */
+function firstActionAfterIndex(auction, seat, startIdx) {
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  for (let i = startIdx + 1; i < auction.bids.length; i++) {
+    const bidSeat = SEATS[(dealerIdx + i) % SEATS.length];
+    if (bidSeat === seat) return i;
+  }
+  return -1;
+}
+
+/**
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @param {number} startIdx
+ * @returns {boolean}
+ */
+function hasOpponentContractAfterIndex(auction, seat, startIdx) {
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  const partner = PARTNER[seat];
+  for (let i = startIdx + 1; i < auction.bids.length; i++) {
+    const bidSeat = SEATS[(dealerIdx + i) % SEATS.length];
+    const bid = auction.bids[i];
+    if (bidSeat !== seat && bidSeat !== partner && bid.type === 'contract') return true;
+  }
+  return false;
 }
