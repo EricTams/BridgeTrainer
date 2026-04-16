@@ -1,5 +1,6 @@
 import { SEATS } from '../model/deal.js';
 import { Strain, isComplete } from '../model/bid.js';
+import { firstBidMeaning, doubleMeaning } from './bid-meaning.js';
 
 /**
  * @typedef {import('../model/bid.js').Auction} Auction
@@ -517,30 +518,24 @@ export function partnershipMinHcp(auction, seat) {
   const partnerBid = findPartnerBid(auction, seat);
   if (!ownBid || !partnerBid) return 0;
 
-  return bidMinHcp(ownBid, isOpener(auction, seat)) +
-         bidMinHcp(partnerBid, isOpener(auction, partner));
+  return firstBidMinHcp(auction, seat) + firstBidMinHcp(auction, partner);
 }
 
 /**
- * Minimum HCP implied by a single contract bid.
- * @param {import('../model/bid.js').ContractBid} bid
- * @param {boolean} opener
+ * Minimum HCP implied by a seat's first contract bid.
+ * @param {Auction} auction
+ * @param {Seat} seat
  * @returns {number}
  */
-function bidMinHcp(bid, opener) {
-  const { level, strain } = bid;
-  if (opener) {
-    if (level === 1 && strain === Strain.NOTRUMP) return 15;
-    if (level === 2 && strain === Strain.NOTRUMP) return 20;
-    if (level === 2 && strain === Strain.CLUBS) return 22;
-    if (level === 2) return 5;
-    if (level >= 3) return 5;
-    return 13;
-  }
-  if (strain === Strain.NOTRUMP && level === 1) return 6;
-  if (strain === Strain.NOTRUMP && level >= 2) return 10;
-  if (level >= 2) return 10;
-  return 6;
+function firstBidMinHcp(auction, seat) {
+  const ownBid = findOwnBid(auction, seat);
+  if (!ownBid) return 0;
+  const partnerBid = findPartnerBid(auction, seat);
+  const meaning = firstBidMeaning(ownBid, {
+    isOpener: isOpener(auction, seat),
+    partnerFirstBid: partnerBid,
+  });
+  return meaning.minHcp;
 }
 
 /**
@@ -645,8 +640,7 @@ export function seatStrengthFloor(auction, seat) {
   const firstBid = findOwnBid(auction, seat);
   if (!firstBid) return 0;
 
-  const opened = isOpener(auction, seat);
-  let floor = bidMinHcp(firstBid, opened);
+  let floor = firstBidMinHcp(auction, seat);
 
   let passedFirstBid = false;
   for (let i = 0; i < auction.bids.length; i++) {
@@ -660,7 +654,9 @@ export function seatStrengthFloor(auction, seat) {
     }
 
     if (bid.type === 'double') {
-      floor += 2;
+      const meaning = doubleMeaning(auction, i);
+      floor = Math.max(floor, meaning.minHcp);
+      continue;
     }
 
     if (bid.type === 'contract') {

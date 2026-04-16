@@ -2,6 +2,7 @@ import { contractBid, pass, Strain, STRAIN_ORDER, STRAIN_SYMBOLS, lastContractBi
 import { SEATS } from '../model/deal.js';
 import { Rank } from '../model/card.js';
 import { pen, penTotal } from './penalty.js';
+import { firstBidMeaning } from './bid-meaning.js';
 
 /**
  * @typedef {import('../model/hand.js').Hand} Hand
@@ -841,27 +842,11 @@ function lastContractBidBySeat(auction) {
 function estimatePartnerMinHCP(ctx) {
   const pfb = ctx.partnerFirstBid;
   if (!pfb) return 0;
-
-  if (ctx.partnerIsOpener) {
-    if (pfb.strain === Strain.NOTRUMP && pfb.level === 1) return 15;
-    if (pfb.strain === Strain.NOTRUMP && pfb.level === 2) return 20;
-    if (pfb.strain === Strain.CLUBS && pfb.level === 2) return 22;
-    if (pfb.level === 1) return 13;
-    if (pfb.level === 2) return 5;
-    return 5;
-  }
-
-  const mfb = ctx.myFirstBid;
-  if (pfb.strain === Strain.NOTRUMP && pfb.level === 1) return 6;
-  if (pfb.strain === Strain.NOTRUMP && pfb.level === 2) return 13;
-  if (mfb && pfb.strain === mfb.strain) {
-    if (pfb.level === 2) return 6;
-    if (pfb.level === 3) return 10;
-    if (pfb.level >= 4) return 13;
-  }
-  if (pfb.level === 1) return 6;
-  if (pfb.level === 2) return 10;
-  return 6;
+  const meaning = firstBidMeaning(pfb, {
+    isOpener: ctx.partnerIsOpener,
+    partnerFirstBid: ctx.myFirstBid,
+  });
+  return meaning.minHcp;
 }
 
 // ═════════════════════════════════════════════════════════════════════

@@ -2,6 +2,7 @@ import { contractBid, pass, dbl, Strain, STRAIN_ORDER, STRAIN_SYMBOLS, lastContr
 import { SEATS } from '../model/deal.js';
 import { Rank } from '../model/card.js';
 import { pen, penTotal } from './penalty.js';
+import { plannedDoubleMeaning } from './bid-meaning.js';
 import {
   findOpponentBid,
   hasPartnerDoubled,
@@ -302,7 +303,8 @@ function scoreDirectPass(bid, hand, eval_, oppBid, balancing) {
   const p = [];
 
   if (oppBid.strain === Strain.NOTRUMP) {
-    const penaltyThreshold = PENALTY_DBL_NT_MIN_HCP - adj;
+    const dMeaning = plannedDoubleMeaning(oppBid);
+    const penaltyThreshold = Math.max(10, dMeaning.minHcp - adj);
     if (hcp >= penaltyThreshold) {
       pen(p, `${hcp} HCP: penalty double of ${oppBid.level}NT available`,
         (hcp - penaltyThreshold + 1) * OC_PASS_HCP_COST);
@@ -321,7 +323,8 @@ function scoreDirectPass(bid, hand, eval_, oppBid, balancing) {
     const levelExtra = Math.max(0, oppBid.level - 1) * DBL_LEVEL_HCP_STEP;
     const oppLen = suitLen(shape, oppBid.strain);
     const dblShapeAdj = oppLen === 0 ? IDEAL_TAKEOUT_VOID_BONUS : (oppLen === 1 ? 1 : 0);
-    const dblMinHcp = Math.max(10, DBL_MIN_HCP + levelExtra - adj - dblShapeAdj);
+    const dMeaning = plannedDoubleMeaning(oppBid);
+    const dblMinHcp = Math.max(10, dMeaning.minHcp - adj - dblShapeAdj);
     if (hcp >= threshold) {
       const bestLen = longestNonOppSuit(shape, oppBid.strain);
       const hasOcSuit = bestLen >= OC_MIN_LEN;

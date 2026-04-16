@@ -2,6 +2,7 @@ import { contractBid, pass, dbl, Strain, STRAIN_ORDER, STRAIN_SYMBOLS, lastContr
 import { SEATS } from '../model/deal.js';
 import { Rank } from '../model/card.js';
 import { pen, penTotal } from './penalty.js';
+import { firstBidMeaning } from './bid-meaning.js';
 import {
   findOwnBid, findPartnerBid, findPartnerLastBid,
   findOpponentBid, isOpener, lastPartnershipContractBid,
@@ -774,34 +775,17 @@ function estimatePartnerRange(auction, seat) {
   const partnerBid = findPartnerBid(auction, seat);
   if (!partnerBid) return { min: 0, max: 0 };
 
-  const partnerOpened = isOpener(auction, partner);
-  const { level, strain } = partnerBid;
-
+  const meaning = firstBidMeaning(partnerBid, {
+    isOpener: isOpener(auction, partner),
+    partnerFirstBid: findOwnBid(auction, seat),
+  });
   /** @type {HcpRange} */
-  let range;
+  let range = { min: meaning.minHcp, max: meaning.maxHcp };
 
-  if (partnerOpened) {
-    if (level === 1 && strain === Strain.NOTRUMP) range = { min: 15, max: 17 };
-    else if (level === 2 && strain === Strain.NOTRUMP) range = { min: 20, max: 21 };
-    else if (level === 2 && strain === Strain.CLUBS) range = { min: 22, max: 37 };
-    else if (level === 2) range = { min: 5, max: 11 };
-    else if (level >= 3) range = { min: 5, max: 10 };
-    else range = { min: 13, max: 21 };
-  } else if (didPartnerOvercall(auction, seat)) {
-    range = level >= 2 ? { min: 10, max: 16 } : { min: 8, max: 16 };
-  } else if (strain === Strain.NOTRUMP) {
-    if (level === 1) range = { min: 6, max: 10 };
-    else if (level === 2) range = { min: 13, max: 15 };
-    else range = { min: 13, max: 17 };
-  } else {
-    const myBid = findOwnBid(auction, seat);
-    if (myBid && myBid.strain === strain) {
-      range = level <= myBid.level + 1 ? { min: 6, max: 10 } : { min: 10, max: 12 };
-    } else if (level >= 2) {
-      range = { min: 10, max: 17 };
-    } else {
-      range = { min: 6, max: 17 };
-    }
+  if (didPartnerOvercall(auction, seat) && !isOpener(auction, partner)) {
+    range = partnerBid.level >= 2
+      ? { min: Math.max(range.min, 10), max: Math.min(range.max, 16) }
+      : { min: Math.max(range.min, 8), max: Math.min(range.max, 16) };
   }
 
   // B-50: If partner's latest bid is a competitive raise of our agreed suit,

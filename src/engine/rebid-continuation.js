@@ -15,6 +15,7 @@ import {
   findPartnerBid, findOwnBid, isOpener,
   partnerPassCount,
 } from './context.js';
+import { firstBidMeaning } from './bid-meaning.js';
 
 /**
  * @typedef {import('../model/hand.js').Hand} Hand
@@ -428,16 +429,16 @@ function contEstimatePartnerRange(auction, seat) {
   let range;
 
   if (partnerOpened) {
-    if (level === 1 && strain === Strain.NOTRUMP) range = { min: 15, max: 17 };
-    else if (level === 2 && strain === Strain.NOTRUMP) range = { min: 20, max: 21 };
-    else if (level === 2 && strain === Strain.CLUBS) range = { min: 22, max: 37 };
-    else if (level === 2) range = { min: 5, max: 11 };
-    else if (level >= 3) range = { min: 5, max: 10 };
-    else range = { min: 13, max: 21 };
+    const m = firstBidMeaning(partnerFirst, { isOpener: true, partnerFirstBid: null });
+    range = { min: m.minHcp, max: m.maxHcp };
   } else {
+    const base = firstBidMeaning(partnerFirst, {
+      isOpener: false,
+      partnerFirstBid: findOwnBid(auction, seat),
+    });
+    range = { min: base.minHcp, max: base.maxHcp };
     if (strain === Strain.NOTRUMP) {
-      if (level === 1) range = { min: 6, max: 10 };
-      else if (level === 2) {
+      if (level === 2) {
         // Check for Jacoby 2NT: partner bid 2NT over our 1M opening
         const ownFirst = findOwnBid(auction, seat);
         if (ownFirst && ownFirst.level === 1 && isMajor(ownFirst.strain) &&
@@ -447,8 +448,9 @@ function contEstimatePartnerRange(auction, seat) {
         } else {
           range = { min: 13, max: 15 };
         }
+      } else if (level >= 3) {
+        range = { min: 13, max: 17 };
       }
-      else range = { min: 13, max: 17 };
     } else {
       const ownFirst = findOwnBid(auction, seat);
       if (ownFirst && ownFirst.level === 1 && ownFirst.strain === Strain.NOTRUMP &&
