@@ -326,6 +326,11 @@ function responderFirstBidMeaning(bid, partnerFirstBid) {
     return { role: 'respond-2c-waiting', minHcp: 0, maxHcp: 7, forcing: 'none' };
   }
 
+  if (partnerFirstBid && partnerFirstBid.level === 2 &&
+      partnerFirstBid.strain === Strain.NOTRUMP) {
+    return respondTo2NTMeaning(bid);
+  }
+
   if (partnerFirstBid && partnerFirstBid.level === 1 &&
       partnerFirstBid.strain === Strain.NOTRUMP) {
     return respondTo1NTMeaning(bid);
@@ -344,8 +349,16 @@ function responderFirstBidMeaning(bid, partnerFirstBid) {
     return { role: 'respond-2nt-invite', minHcp: 11, maxHcp: 12, forcing: 'none' };
   }
 
-  if (bid.strain === Strain.NOTRUMP && bid.level >= 3) {
-    return { role: 'respond-nt-game-or-better', minHcp: 13, maxHcp: 37, forcing: 'none' };
+  if (bid.strain === Strain.NOTRUMP && bid.level === 3) {
+    return { role: 'respond-3nt-game', minHcp: 13, maxHcp: 15, forcing: 'none' };
+  }
+
+  if (bid.strain === Strain.NOTRUMP && bid.level === 4) {
+    return { role: 'respond-4nt-quantitative', minHcp: 16, maxHcp: 17, forcing: 'none' };
+  }
+
+  if (bid.strain === Strain.NOTRUMP && bid.level >= 5) {
+    return { role: 'respond-nt-slam', minHcp: 18, maxHcp: 37, forcing: 'none' };
   }
 
   if (partnerFirstBid && bid.strain === partnerFirstBid.strain) {
@@ -361,6 +374,32 @@ function responderFirstBidMeaning(bid, partnerFirstBid) {
   }
 
   return { role: 'new-suit-one-level', minHcp: 6, maxHcp: 17, forcing: 'one-round' };
+}
+
+/**
+ * @param {ContractBid} bid
+ * @returns {BidMeaning}
+ */
+function respondTo2NTMeaning(bid) {
+  if (bid.level === 3 && bid.strain === Strain.CLUBS) {
+    return { role: 'stayman-over-2nt', minHcp: 4, maxHcp: 17, forcing: 'one-round' };
+  }
+  if (bid.level === 3 && (bid.strain === Strain.DIAMONDS || bid.strain === Strain.HEARTS)) {
+    return { role: 'jacoby-transfer-over-2nt', minHcp: 0, maxHcp: 17, forcing: 'one-round' };
+  }
+  if (bid.level === 3 && bid.strain === Strain.NOTRUMP) {
+    return { role: 'signoff-3nt-over-2nt', minHcp: 0, maxHcp: 10, forcing: 'none' };
+  }
+  if (bid.level === 4 && bid.strain === Strain.NOTRUMP) {
+    return { role: 'quantitative-4nt-over-2nt', minHcp: 11, maxHcp: 12, forcing: 'none' };
+  }
+  if (bid.level === 6 && bid.strain === Strain.NOTRUMP) {
+    return { role: 'to-play-6nt-over-2nt', minHcp: 13, maxHcp: 21, forcing: 'none' };
+  }
+  if (bid.level === 4 && bid.strain === Strain.CLUBS) {
+    return { role: 'gerber-over-2nt', minHcp: 11, maxHcp: 21, forcing: 'none' };
+  }
+  return { role: 'non-standard-over-2nt', minHcp: 0, maxHcp: 37, forcing: 'none' };
 }
 
 /**

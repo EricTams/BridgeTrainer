@@ -303,6 +303,28 @@ function contFindPartnerPrevBid(auction, seat) {
 }
 
 /**
+ * Find partner's second contract bid (their first rebid).
+ * Later continuation bids are often style/pressure-driven and should
+ * not be treated as fresh strength promises for range estimation.
+ * @param {Auction} auction
+ * @param {import('../model/deal.js').Seat} seat
+ * @returns {ContractBid | null}
+ */
+function contFindPartnerRebid(auction, seat) {
+  const partner = CONT_PARTNER[seat];
+  const dealerIdx = SEATS.indexOf(auction.dealer);
+  let count = 0;
+  for (let i = 0; i < auction.bids.length; i++) {
+    const s = SEATS[(dealerIdx + i) % SEATS.length];
+    if (s === partner && auction.bids[i].type === 'contract') {
+      count++;
+      if (count === 2) return /** @type {ContractBid} */ (auction.bids[i]);
+    }
+  }
+  return null;
+}
+
+/**
  * Count how many times the player has previously bid each strain.
  * @param {Auction} auction
  * @param {import('../model/deal.js').Seat} seat
@@ -507,12 +529,12 @@ function contEstimatePartnerRange(auction, seat) {
     }
   }
 
-  if (partnerLast &&
-      (partnerLast.level !== partnerFirst.level || partnerLast.strain !== partnerFirst.strain)) {
-    const partnerPrev = contFindPartnerPrevBid(auction, seat);
-    const prevLevelInSuit = (partnerPrev && partnerPrev.strain === partnerLast.strain)
-      ? partnerPrev.level : undefined;
-    range = applyRebidRangeNarrowing(range, partnerFirst, partnerLast, partnerOpened, prevLevelInSuit);
+  const partnerRebid = contFindPartnerRebid(auction, seat);
+  if (partnerRebid &&
+      (partnerRebid.level !== partnerFirst.level || partnerRebid.strain !== partnerFirst.strain)) {
+    const prevLevelInSuit = partnerRebid.strain === partnerFirst.strain
+      ? partnerFirst.level : undefined;
+    range = applyRebidRangeNarrowing(range, partnerFirst, partnerRebid, partnerOpened, prevLevelInSuit);
   }
 
   range = narrowByPartnerPasses(range, auction, seat);

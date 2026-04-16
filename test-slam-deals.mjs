@@ -251,15 +251,15 @@ const SCENARIOS = [
   },
   {
     id: 'SLAM-GOOD-2',
-    note: 'NS has 33 effective points and should convert the quantitative invite.',
-    dealer: 'E',
+    note: 'Strong NS two-way values should still be able to reach slam.',
+    dealer: 'N',
     targetSide: 'NS',
     expectation: 'reach-slam',
     hands: {
-      N: 'AK.T54.A987.9872',
-      E: 'T87.93.63.AKJT53',
-      S: 'QJ.AKQ7.KQJT.Q64',
-      W: '965432.J862.542.-',
+      N: 'AQ4.AQ4.AQT9.AQJ',
+      E: 'K852.J3.K853.T32',
+      S: '3.KT9876.J64.975',
+      W: 'JT976.52.72.K864',
     },
   },
   {
