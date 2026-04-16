@@ -157,7 +157,9 @@ export function hasOpponentBids(auction, seat) {
 }
 
 /**
- * Check if partner has made a (takeout) double.
+ * Check whether partner's latest double is still an active context for us.
+ * Returns false once this seat has already acted after that double, so old
+ * doubles do not keep forcing later decisions/explanations.
  * @param {Auction} auction
  * @param {Seat} seat
  * @returns {boolean}
@@ -165,11 +167,23 @@ export function hasOpponentBids(auction, seat) {
 export function hasPartnerDoubled(auction, seat) {
   const partner = PARTNER_SEAT[seat];
   const dealerIdx = SEATS.indexOf(auction.dealer);
-  for (let i = 0; i < auction.bids.length; i++) {
+
+  let latestPartnerDouble = -1;
+  for (let i = auction.bids.length - 1; i >= 0; i--) {
     const bidSeat = SEATS[(dealerIdx + i) % SEATS.length];
-    if (bidSeat === partner && auction.bids[i].type === 'double') return true;
+    if (bidSeat === partner && auction.bids[i].type === 'double') {
+      latestPartnerDouble = i;
+      break;
+    }
   }
-  return false;
+  if (latestPartnerDouble < 0) return false;
+
+  for (let i = latestPartnerDouble + 1; i < auction.bids.length; i++) {
+    const bidSeat = SEATS[(dealerIdx + i) % SEATS.length];
+    if (bidSeat === seat) return false;
+    if (bidSeat === partner && auction.bids[i].type === 'contract') return false;
+  }
+  return true;
 }
 
 /**

@@ -17,6 +17,31 @@ const openerHand = createHand([
 let passed = 0;
 let failed = 0;
 
+function lookupBidBySeatAndStep(auction, seat, contractStep) {
+  let seen = 0;
+  const dealerIdx = ['N', 'E', 'S', 'W'].indexOf(auction.dealer);
+  const seats = ['N', 'E', 'S', 'W'];
+  for (let i = 0; i < auction.bids.length; i++) {
+    if (auction.bids[i].type !== 'contract') continue;
+    const bidSeat = seats[(dealerIdx + i) % seats.length];
+    if (bidSeat !== seat) continue;
+    seen++;
+    if (seen === contractStep) return auction.bids[i];
+  }
+  return null;
+}
+
+function assertNoStaleTakeoutMessage(label, recs) {
+  const stale = recs.some(r => r.explanation.includes('Partner doubled for takeout: must bid'));
+  if (stale) {
+    console.log(`  FAIL: stale takeout-double forcing text in ${label}`);
+    failed++;
+  } else {
+    console.log(`  PASS: no stale takeout-double forcing text in ${label}`);
+    passed++;
+  }
+}
+
 function check(label, recs) {
   const hasBug = recs.some(r => r.explanation.includes('Must complete transfer'));
   const topBid = recs[0];
@@ -27,6 +52,20 @@ function check(label, recs) {
     failed++;
   } else {
     console.log('  PASS: no stale transfer penalty');
+    passed++;
+  }
+}
+
+function checkNoStaleTakeout(label, recs) {
+  const hasBug = recs.some(r => r.explanation.includes('Partner doubled for takeout: must bid'));
+  const topBid = recs[0];
+  console.log(`\n${label}`);
+  console.log(`  Top: ${bidToString(topBid.bid).padEnd(6)} [p=${topBid.priority.toFixed(1)}] ${topBid.explanation}`);
+  if (hasBug) {
+    console.log('  FAIL: stale takeout-double explanation still present');
+    failed++;
+  } else {
+    console.log('  PASS: no stale takeout-double explanation');
     passed++;
   }
 }
@@ -126,6 +165,29 @@ function check(label, recs) {
     console.log('  FAIL: transfer not completed (regression)');
     failed++;
   }
+}
+
+// ── Test F: historical partner double should not force later pass text ──
+// Sequence from reported issue, then ask W after S's later penalty double:
+// N 1♥, E P, S 1♠, W P, N 2♦, E X, S 2♥, W 2♠, N 3♥, E 3♠, S X, W ?
+{
+  let a = createAuction('N');
+  a = addBid(a, contractBid(1, Strain.HEARTS)); // N
+  a = addBid(a, pass());                        // E
+  a = addBid(a, contractBid(1, Strain.SPADES));// S
+  a = addBid(a, pass());                        // W
+  a = addBid(a, contractBid(2, Strain.DIAMONDS));// N
+  a = addBid(a, { type: 'double' });            // E
+  a = addBid(a, contractBid(2, Strain.HEARTS));// S
+  a = addBid(a, contractBid(2, Strain.SPADES));// W
+  a = addBid(a, contractBid(3, Strain.HEARTS));// N
+  a = addBid(a, contractBid(3, Strain.SPADES));// E
+  a = addBid(a, { type: 'double' });            // S
+  const recs = getRecommendations(openerHand, a, 'W');
+  const topBid = recs[0];
+  console.log('\nTest F: old partner double should not force after later penalty double');
+  console.log(`  Top: ${bidToString(topBid.bid).padEnd(6)} [p=${topBid.priority.toFixed(1)}] ${topBid.explanation}`);
+  assertNoStaleTakeoutMessage('Test F', recs);
 }
 
 console.log(`\n${'='.repeat(50)}`);
