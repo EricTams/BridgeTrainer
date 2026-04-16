@@ -38,7 +38,8 @@ const STRAIN_BY_TOKEN = {
   NT: Strain.NOTRUMP,
 };
 
-const SUIT_ORDER = [Suit.SPADES, Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS];
+// SAYCBridge expectations in src/tests/test_sayc.py use CDHS order.
+const SUIT_ORDER = [Suit.CLUBS, Suit.DIAMONDS, Suit.HEARTS, Suit.SPADES];
 
 /**
  * @typedef {{

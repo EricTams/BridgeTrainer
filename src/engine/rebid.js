@@ -116,6 +116,9 @@ function score1NTRebid(bid, hand, eval_, partnerBid, interf) {
       ? scoreAfterTransferWithInterference(bid, hand, eval_, Strain.SPADES)
       : scoreAfterTransfer(bid, eval_, Strain.SPADES);
   }
+  if (level === 2 && strain === Strain.SPADES) {
+    return scoreAfterMinorTransferToClubs(bid, eval_);
+  }
   if (level === 2 && strain === Strain.NOTRUMP) return scoreAfter2NTInvite(bid, eval_);
   if (level === 3 && strain === Strain.NOTRUMP) return scoreAfterGame(bid, 3);
   return scoreGenericRebid(bid, eval_);
@@ -362,6 +365,41 @@ function scoreAfterTransferWithInterference(bid, hand, eval_, target) {
   /** @type {PenaltyItem[]} */ const p = [];
   pen(p, 'Non-standard bid after interference over transfer', 5);
   return scored(bid, deduct(penTotal(p)), 'Non-standard response to interference', p);
+}
+
+// ── After Minor Transfer (1NT - 2♠, transfer to clubs) ──────────────
+
+/**
+ * Minor transfer treatment used in SAYCBridge corpus:
+ * opener should accept 2♠ by bidding 3♣ as the default completion.
+ * @param {Bid} bid
+ * @param {Evaluation} eval_
+ * @returns {BidRecommendation}
+ */
+function scoreAfterMinorTransferToClubs(bid, eval_) {
+  const { hcp } = eval_;
+  if (bid.type === 'pass') {
+    /** @type {PenaltyItem[]} */ const p = [];
+    pen(p, 'Transfer action expected: complete to 3♣', FORCING_PASS_COST);
+    return scored(bid, deduct(penTotal(p)), 'Transfer to clubs: pass is non-standard', p);
+  }
+  if (bid.type !== 'contract') return scored(bid, 0, '');
+
+  const { level, strain } = bid;
+  if (level === 3 && strain === Strain.CLUBS) {
+    return scored(bid, deduct(0), '3♣: accept transfer to clubs');
+  }
+
+  /** @type {PenaltyItem[]} */ const p = [];
+  if (strain === Strain.NOTRUMP) {
+    pen(p, `${level}NT skips transfer acceptance`, 6);
+    if (level === 2) {
+      pen(p, `${hcp} HCP: better to describe shape first with 3♣`, HCP_COST);
+    }
+  } else {
+    pen(p, `Non-standard over transfer to clubs`, 8);
+  }
+  return scored(bid, deduct(penTotal(p)), 'Prefer completing minor transfer with 3♣', p);
 }
 
 // ── After 2NT invite over 1NT ───────────────────────────────────────

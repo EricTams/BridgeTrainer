@@ -35,6 +35,12 @@ const RR_FSF_MIN = 13;
 
 const RR_REVERSE_PASS_COST = 12;
 const RR_GF_PASS_COST = 15;
+const RR_TRANSFER_INV_MIN = 8;
+const RR_TRANSFER_INV_MAX = 10;
+const RR_TRANSFER_GAME_MIN = 10;
+const RR_TRANSFER_RAISE_LEN = 6;
+const RR_TRANSFER_NEW_SUIT_LEN = 5;
+const RR_MINOR_TRANSFER_CORRECT_LEN = 6;
 
 /**
  * Minimum HCP the responder already showed with their first bid.
@@ -102,6 +108,19 @@ function scoreResponderRebid(bid, eval_, myBid, openerOpen, openerRebid, respMin
   const ms = myBid.strain;
   const os = openerOpen.strain;
 
+  // 1NT transfer continuation (after partner accepts 2♦/2♥ transfer).
+  if (openerOpen.level === 1 && os === Strain.NOTRUMP &&
+      myBid.level === 2 && (ms === Strain.DIAMONDS || ms === Strain.HEARTS)) {
+    return scoreRR_afterOneNTTransfer(bid, eval_, myBid, openerRebid);
+  }
+
+  // 1NT minor transfer continuation (after 1NT-2♠-3♣).
+  if (openerOpen.level === 1 && os === Strain.NOTRUMP &&
+      myBid.level === 2 && ms === Strain.SPADES &&
+      openerRebid.level === 3 && openerRebid.strain === Strain.CLUBS) {
+    return scoreRR_afterOneNTMinorTransfer(bid, eval_);
+  }
+
   // Jacoby 2NT continuation: I bid 2NT over partner's 1M, partner rebid
   // with 3M (minimum), 3NT (extras), or shortness bid
   if (ms === Strain.NOTRUMP && myBid.level === 2 &&
@@ -126,6 +145,154 @@ function scoreResponderRebid(bid, eval_, myBid, openerOpen, openerRebid, respMin
     return scoreRR_afterReverse(bid, eval_, myBid, openerOpen, openerRebid);
   }
   return scoreRR_afterNewSuit(bid, eval_, myBid, openerOpen, openerRebid, respMin, gf);
+}
+
+// ── After 1NT transfer acceptance ─────────────────────────────────────
+
+/**
+ * @param {Bid} bid
+ * @param {Evaluation} eval_
+ * @param {ContractBid} myBid
+ * @param {ContractBid} openerRebid
+ * @returns {BidRecommendation}
+ */
+function scoreRR_afterOneNTTransfer(bid, eval_, myBid, openerRebid) {
+  const target = myBid.strain === Strain.DIAMONDS ? Strain.HEARTS : Strain.SPADES;
+  if (openerRebid.strain !== target) return scoreGenericRebid(bid, eval_);
+
+  const otherMajor = target === Strain.HEARTS ? Strain.SPADES : Strain.HEARTS;
+  const { hcp, shape, shapeClass } = eval_;
+  const targetLen = suitLen(shape, target);
+  const otherLen = suitLen(shape, otherMajor);
+  const tSym = STRAIN_SYMBOLS[target];
+  const oSym = STRAIN_SYMBOLS[otherMajor];
+
+  if (bid.type === 'pass') {
+    /** @type {PenaltyItem[]} */ const p = [];
+    if (hcp >= RR_TRANSFER_INV_MIN) {
+      pen(p, `${hcp} HCP: too strong to pass transfer acceptance`,
+        (hcp - RR_TRANSFER_INV_MIN + 1) * HCP_COST);
+    }
+    return scored(
+      bid,
+      deduct(penTotal(p)),
+      hcp < RR_TRANSFER_INV_MIN
+        ? `${hcp} HCP: pass after transfer acceptance`
+        : `${hcp} HCP: should continue after transfer`,
+      p
+    );
+  }
+  if (bid.type !== 'contract') return scored(bid, 0, '');
+
+  const { level, strain } = bid;
+
+  if (strain === target && level === 3) {
+    /** @type {PenaltyItem[]} */ const p = [];
+    // After transfer acceptance, many SAYC styles use 3M as a broad
+    // invitational/constructive continuation (not strictly 6+ trumps).
+    pen(p, `${targetLen} ${STRAIN_DISPLAY[target]}, prefer 5+ for invitational raise`,
+      Math.max(0, 5 - targetLen) * (LENGTH_SHORT_COST * 0.5));
+    pen(p, `${hcp} HCP, need ${RR_TRANSFER_INV_MIN}-${RR_TRANSFER_INV_MAX}`,
+      hcpDev(hcp, RR_TRANSFER_INV_MIN, RR_TRANSFER_INV_MAX) * HCP_COST);
+    return scored(bid, deduct(penTotal(p)),
+      `${hcp} HCP with ${targetLen} ${STRAIN_DISPLAY[target]}: invitational 3${tSym}`, p);
+  }
+
+  if (strain === target && level === 4) {
+    /** @type {PenaltyItem[]} */ const p = [];
+    const minGame = targetLen >= RR_TRANSFER_RAISE_LEN ? RR_TRANSFER_INV_MIN : RR_TRANSFER_GAME_MIN;
+    pen(p, `${hcp} HCP, need ${minGame}+`, Math.max(0, minGame - hcp) * HCP_COST);
+    return scored(bid, deduct(penTotal(p)),
+      `${hcp} HCP with ${targetLen} ${STRAIN_DISPLAY[target]}: game 4${tSym}`, p);
+  }
+
+  if (target === Strain.HEARTS && strain === Strain.SPADES && level === 2) {
+    /** @type {PenaltyItem[]} */ const p = [];
+    pen(p, `${otherLen} spades, need 4+ to show second major`,
+      Math.max(0, 4 - otherLen) * LENGTH_SHORT_COST);
+    pen(p, `${hcp} HCP, need ${RR_TRANSFER_INV_MIN}+`, Math.max(0, RR_TRANSFER_INV_MIN - hcp) * HCP_COST);
+    return scored(bid, deduct(penTotal(p)),
+      `${hcp} HCP with ${otherLen} spades: 2${oSym} (second suit)`, p);
+  }
+
+  if (strain !== Strain.NOTRUMP && strain !== target) {
+    const len = suitLen(shape, strain);
+    const sSym = STRAIN_SYMBOLS[strain];
+    /** @type {PenaltyItem[]} */ const p = [];
+    pen(p, `${len} ${STRAIN_DISPLAY[strain]}, need ${RR_TRANSFER_NEW_SUIT_LEN}+`,
+      Math.max(0, RR_TRANSFER_NEW_SUIT_LEN - len) * LENGTH_SHORT_COST);
+    pen(p, `${hcp} HCP, need ${RR_TRANSFER_INV_MIN}+`, Math.max(0, RR_TRANSFER_INV_MIN - hcp) * HCP_COST);
+    return scored(bid, deduct(penTotal(p)),
+      `${hcp} HCP with ${len} ${STRAIN_DISPLAY[strain]}: ${level}${sSym} continuation`, p);
+  }
+
+  if (strain === Strain.NOTRUMP && level === 2) {
+    /** @type {PenaltyItem[]} */ const p = [];
+    pen(p, `${hcp} HCP, need ${RR_TRANSFER_INV_MIN}-${RR_TRANSFER_INV_MAX}`,
+      hcpDev(hcp, RR_TRANSFER_INV_MIN, RR_TRANSFER_INV_MAX) * HCP_COST);
+    if (otherLen >= 4) pen(p, `Have ${otherLen}-card other major: prefer showing it`, FIT_PREF_COST);
+    if (targetLen >= 5) {
+      pen(p, `${targetLen} ${STRAIN_DISPLAY[target]}: often prefer 3${tSym} to keep major focus`, 1);
+    }
+    return scored(bid, deduct(penTotal(p)),
+      `${hcp} HCP: 2NT invitational after transfer`, p);
+  }
+
+  if (strain === Strain.NOTRUMP && level === 3) {
+    /** @type {PenaltyItem[]} */ const p = [];
+    pen(p, `${hcp} HCP, need ${RR_TRANSFER_GAME_MIN}+`,
+      Math.max(0, RR_TRANSFER_GAME_MIN - hcp) * HCP_COST);
+    if (targetLen >= RR_TRANSFER_RAISE_LEN && shapeClass !== 'balanced') {
+      pen(p, `${targetLen}-card fit: prefer major game`, MAJOR_FIT_GAME_COST);
+    }
+    return scored(bid, deduct(penTotal(p)),
+      `${hcp} HCP: 3NT after transfer`, p);
+  }
+
+  return scoreGenericRebid(bid, eval_);
+}
+
+// ── After 1NT minor transfer acceptance (1NT-2♠-3♣) ─────────────────
+
+/**
+ * @param {Bid} bid
+ * @param {Evaluation} eval_
+ * @returns {BidRecommendation}
+ */
+function scoreRR_afterOneNTMinorTransfer(bid, eval_) {
+  const { hcp, shape } = eval_;
+  const clubs = suitLen(shape, Strain.CLUBS);
+  const diamonds = suitLen(shape, Strain.DIAMONDS);
+
+  if (bid.type === 'pass') {
+    /** @type {PenaltyItem[]} */ const p = [];
+    if (diamonds >= RR_MINOR_TRANSFER_CORRECT_LEN && diamonds > clubs) {
+      pen(p, `${diamonds} diamonds longer than clubs: consider correcting to 3♦`, 5);
+    }
+    return scored(bid, deduct(penTotal(p)),
+      diamonds >= RR_MINOR_TRANSFER_CORRECT_LEN && diamonds > clubs
+        ? `${diamonds} diamonds: consider correcting to 3♦`
+        : `${hcp} HCP: pass 3♣`,
+      p);
+  }
+  if (bid.type !== 'contract') return scored(bid, 0, '');
+
+  const { level, strain } = bid;
+  if (level === 3 && strain === Strain.DIAMONDS) {
+    /** @type {PenaltyItem[]} */ const p = [];
+    pen(p, `${diamonds} diamonds, need ${RR_MINOR_TRANSFER_CORRECT_LEN}+`,
+      Math.max(0, RR_MINOR_TRANSFER_CORRECT_LEN - diamonds) * LENGTH_SHORT_COST);
+    return scored(bid, deduct(penTotal(p)),
+      `${diamonds} diamonds: correct to 3♦`, p);
+  }
+
+  if (strain === Strain.NOTRUMP && level === 3) {
+    /** @type {PenaltyItem[]} */ const p = [];
+    pen(p, `${hcp} HCP, need ${RR_TRANSFER_GAME_MIN}+`, Math.max(0, RR_TRANSFER_GAME_MIN - hcp) * HCP_COST);
+    return scored(bid, deduct(penTotal(p)), `${hcp} HCP: 3NT over minor transfer`, p);
+  }
+
+  return scoreGenericRebid(bid, eval_);
 }
 
 // ── After opener raises responder's suit ─────────────────────────────
@@ -448,6 +615,9 @@ function scoreRR_afterNT(bid, eval_, myBid, _openerOpen, openerRebid, _respMin, 
 
   const { hcp, shape, shapeClass } = eval_;
   const ms = myBid.strain;
+  const transferTarget = transferTargetFromCall(myBid);
+  const hasTransferContext = transferTarget !== null;
+  const transferLen = hasTransferContext ? suitLen(shape, transferTarget) : 0;
   const myLen = ms !== Strain.NOTRUMP ? suitLen(shape, ms) : 0;
   const ntLevel = openerRebid.level;
   const highNT = ntLevel >= 2;
@@ -464,6 +634,9 @@ function scoreRR_afterNT(bid, eval_, myBid, _openerOpen, openerRebid, _respMin, 
     }
     if (!highNT && myLen >= RR_OWN_SUIT && hcp <= RR_MIN_MAX) {
       pen(p, `${myLen}-card suit: consider signing off in suit`, 1);
+    }
+    if (hasTransferContext && transferLen >= 5 && hcp >= RR_TRANSFER_INV_MIN) {
+      pen(p, `${transferLen}-card ${STRAIN_DISPLAY[transferTarget]}: consider showing suit`, 2);
     }
     return scored(bid, deduct(penTotal(p)),
       (highNT ? hcp < gameHcp : hcp <= RR_MIN_MAX)
@@ -488,6 +661,9 @@ function scoreRR_afterNT(bid, eval_, myBid, _openerOpen, openerRebid, _respMin, 
   if (level === 3 && strain === Strain.NOTRUMP) {
     /** @type {PenaltyItem[]} */ const p = [];
     pen(p, `${hcp} HCP, need ${gameHcp}+`, Math.max(0, gameHcp - hcp) * HCP_COST);
+    if (hasTransferContext && transferLen >= 6) {
+      pen(p, `${transferLen}-card ${STRAIN_DISPLAY[transferTarget]}: often prefer major game`, MAJOR_FIT_GAME_COST);
+    }
     return scored(bid, deduct(penTotal(p)),
       hcp >= gameHcp ? `${hcp} HCP: 3NT game` : `${hcp} HCP: need ${gameHcp}+ for game`, p);
   }
@@ -527,6 +703,19 @@ function scoreRR_afterNT(bid, eval_, myBid, _openerOpen, openerRebid, _respMin, 
   }
 
   return scoreGenericRebid(bid, eval_);
+}
+
+/**
+ * When responder's first call is a Jacoby transfer over 1NT,
+ * return the major it requests.
+ * @param {ContractBid} bid
+ * @returns {import('../model/bid.js').Strain | null}
+ */
+function transferTargetFromCall(bid) {
+  if (bid.level !== 2) return null;
+  if (bid.strain === Strain.DIAMONDS) return Strain.HEARTS;
+  if (bid.strain === Strain.HEARTS) return Strain.SPADES;
+  return null;
 }
 
 // ── After opener reverses ────────────────────────────────────────────
