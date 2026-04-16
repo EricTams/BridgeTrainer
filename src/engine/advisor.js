@@ -9,7 +9,7 @@ import { getCompetitiveBids, getCompetitiveResponseBids, getPostDoubleBids } fro
 import { getConventionResponse, getSlamInitiationBids } from './conventions.js';
 import { getContestBids } from './contest.js';
 import { interpretAuctionState } from '../engine-v2/semantics/interpreter.js';
-import { getNTStaymanTransferRuleRecommendations } from '../engine-v2/rules/conventions/nt-stayman-transfers.js';
+import { getConventionRuleRecommendations } from '../engine-v2/rules/conventions/runner.js';
 import {
   applyForcingConstraints,
   scopeCandidatesByHardObligations,
@@ -36,7 +36,7 @@ export function getRecommendations(hand, auction, seat) {
   maybeRunV2Diagnostics(auction, seat, eval_);
   const v2Meaning = interpretAuctionState(auction, seat, eval_);
 
-  const v2Convention = getNTStaymanTransferRuleRecommendations(hand, auction, seat);
+  const v2Convention = getConventionRuleRecommendations(hand, auction, seat);
   if (v2Convention) {
     const legal = v2Convention.filter(rec => isLegalBid(auction, rec.bid));
     const scoped = scopeCandidatesByHardObligations(legal, v2Meaning, auction);
