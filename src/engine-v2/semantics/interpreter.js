@@ -12,7 +12,6 @@ import { firstBidMeaningInAuction } from '../../engine/bid-meaning.js';
 import {
   createSeatMeaning,
   createAuctionMeaningState,
-  forcingToBool,
   rangeFromMeaning,
 } from '../model/semantic-state.js';
 
@@ -84,7 +83,7 @@ export function interpretAuctionState(auction, seat, eval_) {
     role: roleFromMeaning(rhoMeaning.role),
   });
 
-  const forcingActive = forcingToBool(me.forcing) || me.obligations.length > 0;
+  const forcingActive = me.obligations.length > 0;
   const activeConventions = detectConventions(myFirst, partnerFirst, opponentFirst, auction, seat);
 
   return createAuctionMeaningState({

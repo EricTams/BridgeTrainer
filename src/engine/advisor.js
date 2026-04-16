@@ -9,6 +9,7 @@ import { getCompetitiveBids, getCompetitiveResponseBids, getPostDoubleBids } fro
 import { getConventionResponse, getSlamInitiationBids } from './conventions.js';
 import { getContestBids } from './contest.js';
 import { interpretAuctionState } from '../engine-v2/semantics/interpreter.js';
+import { applyForcingConstraints } from '../engine-v2/constraints/forcing.js';
 
 /**
  * @typedef {import('./opening.js').BidRecommendation} BidRecommendation
@@ -29,6 +30,7 @@ export function getRecommendations(hand, auction, seat) {
   // AIDEV-NOTE: v2 semantic interpreter currently runs in diagnostics mode.
   // It must not affect recommendations until constraint/rule migration begins.
   maybeRunV2Diagnostics(auction, seat, eval_);
+  const v2Meaning = interpretAuctionState(auction, seat, eval_);
 
   const conventionResp = getConventionResponse(hand, eval_, auction, seat);
   if (conventionResp) return conventionResp;
@@ -156,6 +158,8 @@ export function getRecommendations(hand, auction, seat) {
   if (results.length === 0) {
     results = generateFallbackBids(eval_, auction);
   }
+
+  results = applyForcingConstraints(results, v2Meaning);
 
   return results.sort(bidRecCompare);
 }
