@@ -1,5 +1,6 @@
 import { buildConventionPackContext } from './context.js';
 import { ntStaymanTransferPack } from './nt-stayman-transfers.js';
+import { fallbackNoopPack } from './fallback-noop.js';
 
 /**
  * @typedef {import('../../../model/hand.js').Hand} Hand
@@ -20,6 +21,7 @@ import { ntStaymanTransferPack } from './nt-stayman-transfers.js';
 /** @type {ReadonlyArray<ConventionPack>} */
 const CONVENTION_PACKS = Object.freeze([
   ntStaymanTransferPack,
+  fallbackNoopPack,
 ]);
 
 /**
@@ -44,4 +46,11 @@ export function getConventionRuleRecommendations(hand, auction, seat) {
 /** @returns {number} */
 export function conventionPackCount() {
   return CONVENTION_PACKS.length;
+}
+
+/**
+ * @returns {ReadonlyArray<{ id: string, priority: number }>}
+ */
+export function conventionPackMeta() {
+  return CONVENTION_PACKS.map(pack => ({ id: pack.id, priority: pack.priority }));
 }
