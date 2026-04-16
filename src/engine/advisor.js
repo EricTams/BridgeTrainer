@@ -50,17 +50,18 @@ export function getRecommendations(hand, auction, seat) {
         break;
       }
       const oppBid = findOpponentBid(auction, seat);
+      const partnerBidDoubled = hasDoubleAfterPartnerBid(auction, seat);
       if (oppBid) {
         results = getCompetitiveResponseBids(hand, eval_, partnerBid, oppBid, auction, seat);
       } else {
-        results = getRespondingBids(hand, eval_, partnerBid);
+        results = getRespondingBids(hand, eval_, partnerBid, { partnerBidDoubled });
       }
 
       const partnerLast = findPartnerLastBid(auction, seat);
       if (partnerLast &&
           (partnerLast.level !== partnerBid.level || partnerLast.strain !== partnerBid.strain)) {
         const oppSuits = opponentStrains(auction, seat);
-        if (!hasDoubleAfterPartnerBid(auction, seat) &&
+        if (!partnerBidDoubled &&
             partnerLast.strain !== Strain.NOTRUMP && oppSuits.has(partnerLast.strain)) {
           results = results.map(rec => {
             if (rec.bid.type === 'pass') {

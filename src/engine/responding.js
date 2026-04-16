@@ -126,9 +126,11 @@ const STRAIN_DISPLAY = {
  * @param {Hand} hand
  * @param {Evaluation} evaluation
  * @param {ContractBid} partnerBid
+ * @param {{ partnerBidDoubled?: boolean }} [options]
  * @returns {BidRecommendation[]}
  */
-export function getRespondingBids(hand, evaluation, partnerBid) {
+export function getRespondingBids(hand, evaluation, partnerBid, options = {}) {
+  const partnerBidDoubled = options.partnerBidDoubled === true;
   if (partnerBid.level === 2 && partnerBid.strain === Strain.CLUBS) {
     return get2CResponseBids(evaluation);
   }
@@ -136,7 +138,7 @@ export function getRespondingBids(hand, evaluation, partnerBid) {
     return get2NTResponseBids(evaluation);
   }
   if (partnerBid.level === 2 && partnerBid.strain !== Strain.NOTRUMP) {
-    return getWeakTwoResponseBids(hand, evaluation, partnerBid.strain);
+    return getWeakTwoResponseBids(hand, evaluation, partnerBid.strain, partnerBidDoubled);
   }
   if (partnerBid.level >= 3 && partnerBid.strain !== Strain.NOTRUMP) {
     return getPreempt3ResponseBids(evaluation, partnerBid);
@@ -149,7 +151,7 @@ export function getRespondingBids(hand, evaluation, partnerBid) {
   /** @type {BidRecommendation[]} */
   const results = [];
   for (const bid of candidates) {
-    results.push(scoreResponseBid(bid, hand, evaluation, ps));
+    results.push(scoreResponseBid(bid, hand, evaluation, ps, partnerBidDoubled));
   }
   return results.sort((a, b) => b.priority - a.priority);
 }
@@ -176,9 +178,10 @@ function respondingCandidates(ps) {
  * @param {Hand} hand
  * @param {Evaluation} eval_
  * @param {import('../model/bid.js').Strain} ps - partner's strain
+ * @param {boolean} partnerBidDoubled
  * @returns {BidRecommendation}
  */
-function scoreResponseBid(bid, hand, eval_, ps) {
+function scoreResponseBid(bid, hand, eval_, ps, partnerBidDoubled) {
   if (bid.type === 'pass') return scorePass(bid, eval_);
   if (bid.type !== 'contract') return scored(bid, 0, '');
 
@@ -193,7 +196,9 @@ function scoreResponseBid(bid, hand, eval_, ps) {
   if (level === 3 && strain !== Strain.NOTRUMP && strain !== ps && !ranksAbove(strain, ps)) {
     return scoreJumpShift(bid, eval_);
   }
-  if (level === 4 && strain === ps && isMajor(ps)) return scoreGameRaise(bid, eval_, ps);
+  if (level === 4 && strain === ps && isMajor(ps)) {
+    return scoreGameRaise(bid, eval_, ps, partnerBidDoubled);
+  }
   return scoreGenericResponse(bid, eval_, ps);
 }
 
@@ -506,15 +511,16 @@ function jumpShiftExpl(hcp, len, level, strain) {
  * @param {import('../model/bid.js').Bid} bid
  * @param {Evaluation} eval_
  * @param {import('../model/bid.js').Strain} ps
+ * @param {boolean} partnerBidDoubled
  */
-function scoreGameRaise(bid, eval_, ps) {
+function scoreGameRaise(bid, eval_, ps, partnerBidDoubled) {
   const { hcp, shape, shapeClass } = eval_;
   const support = suitLen(shape, ps);
   const name = STRAIN_DISPLAY[ps];
 
   /** @type {PenaltyItem[]} */
   const p = [];
-  if (hcp <= MAJOR_GAME_PREEMPT_OVER_DOUBLE_MAX_HCP) {
+  if (partnerBidDoubled && hcp <= MAJOR_GAME_PREEMPT_OVER_DOUBLE_MAX_HCP) {
     pen(p,
       `${hcp} HCP: preemptive game raise not standard over opponent double`,
       GAME_RAISE_BALANCED_COST);
@@ -526,14 +532,14 @@ function scoreGameRaise(bid, eval_, ps) {
   if (shapeClass === 'balanced') pen(p, 'Balanced: prefer constructive bidding', GAME_RAISE_BALANCED_COST);
   else if (shapeClass === 'semi-balanced') pen(p, 'Semi-balanced: less ideal for preempt', GAME_RAISE_SEMI_BAL_COST);
 
-  return scored(bid, deduct(penTotal(p)), gameRaiseExpl(hcp, support, shapeClass, ps), p);
+  return scored(bid, deduct(penTotal(p)), gameRaiseExpl(hcp, support, shapeClass, ps, partnerBidDoubled), p);
 }
 
-/** @param {number} hcp @param {number} support @param {import('./evaluate.js').ShapeClass} shapeClass @param {import('../model/bid.js').Strain} ps */
-function gameRaiseExpl(hcp, support, shapeClass, ps) {
+/** @param {number} hcp @param {number} support @param {import('./evaluate.js').ShapeClass} shapeClass @param {import('../model/bid.js').Strain} ps @param {boolean} partnerBidDoubled */
+function gameRaiseExpl(hcp, support, shapeClass, ps, partnerBidDoubled) {
   const sym = STRAIN_SYMBOLS[ps];
   const name = STRAIN_DISPLAY[ps];
-  if (hcp <= MAJOR_GAME_PREEMPT_OVER_DOUBLE_MAX_HCP) {
+  if (partnerBidDoubled && hcp <= MAJOR_GAME_PREEMPT_OVER_DOUBLE_MAX_HCP) {
     return `${hcp} HCP: prefer pass/constructive action over preemptive 4${sym} after double`;
   }
   if (support < GAME_RAISE_MIN_SUPPORT) return `${support} ${name}: need ${GAME_RAISE_MIN_SUPPORT}+ for preemptive 4${sym}`;
@@ -1388,14 +1394,15 @@ function scoreGeneric2CResponse(bid, eval_) {
  * @param {Hand} hand
  * @param {Evaluation} eval_
  * @param {import('../model/bid.js').Strain} ps - partner's suit
+ * @param {boolean} partnerBidDoubled
  * @returns {BidRecommendation[]}
  */
-function getWeakTwoResponseBids(hand, eval_, ps) {
+function getWeakTwoResponseBids(hand, eval_, ps, partnerBidDoubled) {
   const candidates = weakTwoResponseCandidates(ps);
   /** @type {BidRecommendation[]} */
   const results = [];
   for (const bid of candidates) {
-    results.push(scoreWeakTwoResponse(bid, hand, eval_, ps));
+    results.push(scoreWeakTwoResponse(bid, hand, eval_, ps, partnerBidDoubled));
   }
   return results.sort((a, b) => b.priority - a.priority);
 }
@@ -1417,26 +1424,29 @@ function weakTwoResponseCandidates(ps) {
  * @param {Hand} hand
  * @param {Evaluation} eval_
  * @param {import('../model/bid.js').Strain} ps
+ * @param {boolean} partnerBidDoubled
  * @returns {BidRecommendation}
  */
-function scoreWeakTwoResponse(bid, hand, eval_, ps) {
-  if (bid.type === 'pass') return scoreWTPass(bid, eval_, ps);
+function scoreWeakTwoResponse(bid, hand, eval_, ps, partnerBidDoubled) {
+  if (bid.type === 'pass') return scoreWTPass(bid, eval_, ps, partnerBidDoubled);
   if (bid.type !== 'contract') return scored(bid, 0, '');
   const { level, strain } = bid;
-  if (level === 2 && strain === Strain.NOTRUMP) return scoreWT2NT(bid, hand, eval_, ps);
+  if (level === 2 && strain === Strain.NOTRUMP) {
+    return scoreWT2NT(bid, hand, eval_, ps, partnerBidDoubled);
+  }
   if (level === 2) return scoreWTNewSuit(bid, hand, eval_, ps);
-  if (level === 3 && strain === ps) return scoreWTSimpleRaise(bid, eval_, ps);
+  if (level === 3 && strain === ps) return scoreWTSimpleRaise(bid, eval_, ps, partnerBidDoubled);
   if (level === 3 && strain === Strain.NOTRUMP) return scoreWT3NT(bid, eval_, ps);
   if (level === 3) return scoreWTNewSuit(bid, hand, eval_, ps);
-  if (level === 4 && strain === ps && isMajor(ps)) return scoreWTGameRaise(bid, eval_, ps);
+  if (level === 4 && strain === ps && isMajor(ps)) return scoreWTGameRaise(bid, eval_, ps, partnerBidDoubled);
   if (level >= 4 && strain !== ps && strain !== Strain.NOTRUMP) return scoreWTNewSuit(bid, hand, eval_, ps);
   return scoreGenericWTResponse(bid, eval_, ps);
 }
 
 // ── Weak Two: Pass ───────────────────────────────────────────────────
 
-/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} ps */
-function scoreWTPass(bid, eval_, ps) {
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} ps @param {boolean} partnerBidDoubled */
+function scoreWTPass(bid, eval_, ps, partnerBidDoubled) {
   const { hcp, shape } = eval_;
   const support = suitLen(shape, ps);
   const name = STRAIN_DISPLAY[ps];
@@ -1453,17 +1463,21 @@ function scoreWTPass(bid, eval_, ps) {
   if (hcp > WT_PASS_MAX) {
     expl = `${hcp} HCP: too strong to pass (consider game)`;
   } else if (support >= WT_RAISE_SUPPORT) {
-    expl = `${support} ${name} support: consider preemptive raise`;
+    expl = partnerBidDoubled
+      ? `${support} ${name} support after double: consider competing`
+      : `${support} ${name} support: consider preemptive raise`;
   } else {
-    expl = `${hcp} HCP, no fit: pass partner's weak two`;
+    expl = partnerBidDoubled
+      ? `${hcp} HCP: pass is reasonable after opponents doubled partner's weak two`
+      : `${hcp} HCP, no fit: pass partner's weak two`;
   }
   return scored(bid, deduct(penTotal(p)), expl, p);
 }
 
 // ── Weak Two: 2NT Feature Ask (14-16 HCP, game interest) ────────────
 
-/** @param {import('../model/bid.js').Bid} bid @param {Hand} hand @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} ps */
-function scoreWT2NT(bid, hand, eval_, ps) {
+/** @param {import('../model/bid.js').Bid} bid @param {Hand} hand @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} ps @param {boolean} partnerBidDoubled */
+function scoreWT2NT(bid, hand, eval_, ps, partnerBidDoubled) {
   const { hcp, shape } = eval_;
   const support = suitLen(shape, ps);
   const name = STRAIN_DISPLAY[ps];
@@ -1478,10 +1492,15 @@ function scoreWT2NT(bid, hand, eval_, ps) {
   if (ssStrain) {
     pen(p, `Self-sufficient ${STRAIN_DISPLAY[ssStrain]} suit: bid it directly`, 5);
   }
+  if (partnerBidDoubled) {
+    pen(p, '2NT feature ask is mostly an uncontested weak-two treatment', 4);
+  }
 
   let expl;
   if (ssStrain) {
     expl = `Have self-sufficient ${STRAIN_DISPLAY[ssStrain]}: prefer bidding own suit`;
+  } else if (partnerBidDoubled) {
+    expl = `${hcp} HCP: 2NT feature ask is less standard after opponents double`;
   } else if (hcp >= WT_2NT_MIN && hcp <= WT_2NT_MAX) {
     expl = `${hcp} HCP: 2NT feature ask (game interest)`;
   } else if (hcp < WT_2NT_MIN) {
@@ -1494,8 +1513,8 @@ function scoreWT2NT(bid, hand, eval_, ps) {
 
 // ── Weak Two: Simple Raise (3-level, preemptive, 3+ support) ────────
 
-/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} ps */
-function scoreWTSimpleRaise(bid, eval_, ps) {
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} ps @param {boolean} partnerBidDoubled */
+function scoreWTSimpleRaise(bid, eval_, ps, partnerBidDoubled) {
   const { hcp, shape } = eval_;
   const support = suitLen(shape, ps);
   const name = STRAIN_DISPLAY[ps];
@@ -1515,7 +1534,9 @@ function scoreWTSimpleRaise(bid, eval_, ps) {
   } else if (hcp > WT_RAISE_MAX_HCP) {
     expl = `${hcp} HCP: too strong for preemptive 3${sym}, consider game`;
   } else {
-    expl = `${support} ${name} support: preemptive raise to 3${sym}`;
+    expl = partnerBidDoubled
+      ? `${support} ${name} support: competitive raise to 3${sym} after double`
+      : `${support} ${name} support: preemptive raise to 3${sym}`;
   }
   return scored(bid, deduct(penTotal(p)), expl, p);
 }
@@ -1579,8 +1600,8 @@ function scoreWTNewSuit(bid, hand, eval_, _ps) {
 
 // ── Weak Two: Game Raise (4♥/4♠, 14+ HCP or 5+ support) ────────────
 
-/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} ps */
-function scoreWTGameRaise(bid, eval_, ps) {
+/** @param {import('../model/bid.js').Bid} bid @param {Evaluation} eval_ @param {import('../model/bid.js').Strain} ps @param {boolean} partnerBidDoubled */
+function scoreWTGameRaise(bid, eval_, ps, partnerBidDoubled) {
   const { hcp, shape } = eval_;
   const support = suitLen(shape, ps);
   const name = STRAIN_DISPLAY[ps];
@@ -1600,7 +1621,9 @@ function scoreWTGameRaise(bid, eval_, ps) {
   } else if (hcp < minHcp) {
     expl = `${hcp} HCP: need ${minHcp}+ for game raise to 4${sym}`;
   } else if (support >= WT_GAME_PREEMPT_SUPPORT) {
-    expl = `${support} ${name} support: preemptive 4${sym}`;
+    expl = partnerBidDoubled
+      ? `${support} ${name} support: competitive 4${sym} after double`
+      : `${support} ${name} support: preemptive 4${sym}`;
   } else {
     expl = `${hcp} HCP with ${support} ${name}: game raise to 4${sym}`;
   }

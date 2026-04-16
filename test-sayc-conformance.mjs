@@ -172,6 +172,14 @@ const SCENARIOS = [
     forbidTop: ['4H'],
     note: 'After 1H-X with weak values, pass must outrank preemptive 4H.',
   },
+  {
+    id: 'R-weak-two-doubled-competitive-text',
+    dealer: 'S',
+    calls: ['P', 'P', '2D', 'X'],
+    hand: 'A74.K963.984.J62',
+    expectedTop: ['3D'],
+    note: 'After a weak-two is doubled, simple raise should be scored as competitive (not uncontested preemptive).',
+  },
 ];
 
 /**
