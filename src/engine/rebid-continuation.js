@@ -52,6 +52,26 @@ const CONT_ABOVE_GAME_COST = 5;
 const CONT_FIT_GAME_BONUS = 3;
 const CONT_LOW_LEVEL_GAME_COST = 3;
 
+/**
+ * SAYC 2♣ opening is artificial and should not be treated as a natural
+ * club suit when inferring partnership fit/suit preference later.
+ * @param {Auction} auction
+ * @param {number} bidIndex
+ * @returns {boolean}
+ */
+function isArtificialStrong2COpening(auction, bidIndex) {
+  const bid = auction.bids[bidIndex];
+  if (!bid || bid.type !== 'contract') return false;
+  if (/** @type {ContractBid} */ (bid).level !== 2 ||
+      /** @type {ContractBid} */ (bid).strain !== Strain.CLUBS) {
+    return false;
+  }
+  for (let i = 0; i < bidIndex; i++) {
+    if (auction.bids[i].type === 'contract') return false;
+  }
+  return true;
+}
+
 /** Combined-point threshold for game in the given strain (29 for minors, 25 otherwise). */
 function contGameThreshold(strain) {
   if (!strain || strain === Strain.NOTRUMP || isMajor(strain)) return CONT_COMBINED_GAME;
@@ -231,6 +251,7 @@ function contFindFit(eval_, auction, seat) {
   for (let i = 0; i < auction.bids.length; i++) {
     const s = SEATS[(dealerIdx + i) % SEATS.length];
     const b = auction.bids[i];
+    if (isArtificialStrong2COpening(auction, i)) continue;
     if (b.type === 'contract' && b.strain !== Strain.NOTRUMP &&
         !oppSuits.has(/** @type {ContractBid} */ (b).strain)) {
       if (s === seat) ownSuits.add(/** @type {ContractBid} */ (b).strain);
@@ -273,6 +294,7 @@ function contPartnerSuits(auction, seat) {
   for (let i = 0; i < auction.bids.length; i++) {
     const s = SEATS[(dealerIdx + i) % SEATS.length];
     const b = auction.bids[i];
+    if (isArtificialStrong2COpening(auction, i)) continue;
     if (s === partner && b.type === 'contract' && b.strain !== Strain.NOTRUMP &&
         !oppSuits.has(/** @type {ContractBid} */ (b).strain)) {
       suits.add(/** @type {ContractBid} */ (b).strain);
@@ -337,6 +359,7 @@ function contOwnBidCounts(auction, seat) {
   for (let i = 0; i < auction.bids.length; i++) {
     const s = SEATS[(dealerIdx + i) % SEATS.length];
     const b = auction.bids[i];
+    if (isArtificialStrong2COpening(auction, i)) continue;
     if (s === seat && b.type === 'contract') {
       const strain = /** @type {ContractBid} */ (b).strain;
       counts.set(strain, (counts.get(strain) || 0) + 1);
@@ -359,6 +382,7 @@ function contCollectOwnSuits(auction, seat) {
   for (let i = 0; i < auction.bids.length; i++) {
     const s = SEATS[(dealerIdx + i) % SEATS.length];
     const b = auction.bids[i];
+    if (isArtificialStrong2COpening(auction, i)) continue;
     if (s === seat && b.type === 'contract' && /** @type {ContractBid} */ (b).strain !== Strain.NOTRUMP) {
       suits.add(/** @type {ContractBid} */ (b).strain);
     }
