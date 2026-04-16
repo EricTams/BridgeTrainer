@@ -118,15 +118,15 @@ function collectObligations(auction, seat, myFirst, partnerFirst) {
   if (partnerFirst.level === 2 && partnerFirst.strain === Strain.CLUBS &&
       myFirst && myFirst.level === 1 && myFirst.strain === Strain.NOTRUMP &&
       isOpener(auction, seat)) {
-    obligations.push('reply-to-stayman');
+    obligations.push('reply-to-stayman-hard');
   }
   if (partnerFirst.level === 2 &&
       (partnerFirst.strain === Strain.DIAMONDS || partnerFirst.strain === Strain.HEARTS) &&
       myFirst && myFirst.level === 1 && myFirst.strain === Strain.NOTRUMP &&
       isOpener(auction, seat)) {
     obligations.push(partnerFirst.strain === Strain.DIAMONDS
-      ? 'complete-transfer-hearts'
-      : 'complete-transfer-spades');
+      ? 'complete-transfer-hearts-hard'
+      : 'complete-transfer-spades-hard');
   }
   return obligations;
 }

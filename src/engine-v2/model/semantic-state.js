@@ -3,13 +3,14 @@
  * @typedef {{ min: number, max: number }} NumericRange
  * @typedef {{ min: number, max: number }} SuitLengthRange
  * @typedef {'none' | 'one-round' | 'game'} ForcingStatus
+ * @typedef {{ id: string, mode: 'hard' | 'soft' }} Obligation
  *
  * @typedef {{
  *   hcp: NumericRange,
  *   suit: Record<SuitKey, SuitLengthRange>,
  *   balancedLikelihood: number,
  *   forcing: 'none' | 'one-round' | 'game',
- *   obligations: string[],
+ *   obligations: Obligation[],
  *   agreedStrain: 'C' | 'D' | 'H' | 'S' | 'NT' | null,
  *   role: string,
  * }} SeatMeaning
@@ -151,11 +152,13 @@ export function setBalancedLikelihood(meaning, value) {
 
 /**
  * @param {SeatMeaning} meaning
- * @param {string} obligation
+ * @param {string} obligationId
+ * @param {'hard' | 'soft'} [mode]
  * @returns {void}
  */
-export function addSeatObligation(meaning, obligation) {
-  if (!meaning.obligations.includes(obligation)) meaning.obligations.push(obligation);
+export function addSeatObligation(meaning, obligationId, mode = 'hard') {
+  const exists = meaning.obligations.some(o => o.id === obligationId);
+  if (!exists) meaning.obligations.push({ id: obligationId, mode });
 }
 
 /**
