@@ -7,6 +7,7 @@ import {
   suitLen, isMajor, ranksAbove, hcpDev, shapePenalty, deduct, scored,
   isGameLevel, scoreGenericRebid, rebidCandidates, minBidLevel,
 } from './rebid-shared.js';
+import { firstBidMeaning, jacoby2NTOpenerRebidMeaning } from './bid-meaning.js';
 
 /**
  * @typedef {import('../model/hand.js').Hand} Hand
@@ -42,9 +43,11 @@ const RR_GF_PASS_COST = 15;
  * @returns {number}
  */
 function responderMinShown(myBid, openerOpen) {
-  if (myBid.strain === Strain.NOTRUMP) return myBid.level >= 2 ? 13 : 6;
-  if (myBid.strain === openerOpen.strain) return myBid.level >= 3 ? 10 : 6;
-  return myBid.level >= 2 ? 10 : 6;
+  const meaning = firstBidMeaning(myBid, {
+    isOpener: false,
+    partnerFirstBid: openerOpen,
+  });
+  return meaning.minHcp;
 }
 
 /**
@@ -54,9 +57,11 @@ function responderMinShown(myBid, openerOpen) {
  * @returns {boolean}
  */
 function isRespGF(myBid, openerOpen) {
-  if (myBid.strain === Strain.NOTRUMP && myBid.level >= 2) return true;
-  if (myBid.strain !== openerOpen.strain && myBid.strain !== Strain.NOTRUMP && myBid.level >= 3) return true;
-  return false;
+  const meaning = firstBidMeaning(myBid, {
+    isOpener: false,
+    partnerFirstBid: openerOpen,
+  });
+  return meaning.forcing === 'game';
 }
 
 /**
@@ -228,12 +233,9 @@ function scoreRR_afterJacoby2NT(bid, eval_, openerOpen, openerRebid) {
   const os = openerOpen.strain;
   const oSym = STRAIN_SYMBOLS[os];
   const oSup = suitLen(shape, os);
-  const openerExtras = openerRebid.strain === Strain.NOTRUMP && openerRebid.level === 3;
-  const openerMin = !openerExtras;
-  const estPartnerMin = openerExtras ? 15 : 13;
-  const estPartnerMax = openerExtras ? 21 : 15;
-  const combinedMin = hcp + estPartnerMin;
-  const combinedMax = hcp + estPartnerMax;
+  const openerMeaning = jacoby2NTOpenerRebidMeaning(os, openerRebid);
+  const combinedMin = hcp + openerMeaning.minHcp;
+  const combinedMax = hcp + openerMeaning.maxHcp;
   const SLAM_COMBINED = 33;
 
   if (isGameLevel(openerRebid)) return scoreAfterGame(bid, openerRebid.level);

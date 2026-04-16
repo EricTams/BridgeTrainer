@@ -2,7 +2,12 @@ import { contractBid, pass, dbl, Strain, STRAIN_ORDER, STRAIN_SYMBOLS, lastContr
 import { SEATS } from '../model/deal.js';
 import { Rank } from '../model/card.js';
 import { pen, penTotal } from './penalty.js';
-import { firstBidMeaning } from './bid-meaning.js';
+import {
+  firstBidRangeInAuction,
+  applyCompetitiveRaiseCap,
+  applyPassRangeNarrowing,
+  isOvercallFirstBid,
+} from './bid-meaning.js';
 import {
   findOwnBid, findPartnerBid, findPartnerLastBid,
   findOpponentBid, isOpener, lastPartnershipContractBid,
@@ -752,7 +757,7 @@ function estimatePartnerFitLength(fitStrain, auction, seat) {
       if (isMajor(fitStrain)) return 5;
       return 3;
     }
-    if (didPartnerOvercall(auction, seat)) return 5;
+    if (isOvercallFirstBid(auction, partner)) return 5;
     return 4;
   }
 
@@ -775,18 +780,8 @@ function estimatePartnerRange(auction, seat) {
   const partnerBid = findPartnerBid(auction, seat);
   if (!partnerBid) return { min: 0, max: 0 };
 
-  const meaning = firstBidMeaning(partnerBid, {
-    isOpener: isOpener(auction, partner),
-    partnerFirstBid: findOwnBid(auction, seat),
-  });
   /** @type {HcpRange} */
-  let range = { min: meaning.minHcp, max: meaning.maxHcp };
-
-  if (didPartnerOvercall(auction, seat) && !isOpener(auction, partner)) {
-    range = partnerBid.level >= 2
-      ? { min: Math.max(range.min, 10), max: Math.min(range.max, 16) }
-      : { min: Math.max(range.min, 8), max: Math.min(range.max, 16) };
-  }
+  let range = firstBidRangeInAuction(auction, partner);
 
   // B-50: If partner's latest bid is a competitive raise of our agreed suit,
   // check whether it was at the cheapest available level (LOTT-competitive,
@@ -802,19 +797,14 @@ function estimatePartnerRange(auction, seat) {
       const cheapestLevel = detectCheapestRaiseLevel(auction, seat);
       const isCompetitiveRaise = cheapestLevel !== null && partnerLast.level <= cheapestLevel;
       if (isCompetitiveRaise) {
-        // LOTT-competitive raise: partner just competed to the cheapest level.
-        // Don't credit extra values — cap the max at the low end of the range.
-        const mid = Math.floor((range.min + range.max) / 2);
-        range = { min: range.min, max: Math.min(range.max, mid + 1) };
+        // LOTT-competitive raise: cheapest compete, no extras shown.
+        range = applyCompetitiveRaiseCap(range);
       }
     }
   }
 
   const passes = partnerPassCount(auction, seat);
-  if (passes > 0) {
-    const reduction = passes * 2;
-    range = { min: range.min, max: Math.max(range.min, range.max - reduction) };
-  }
+  range = applyPassRangeNarrowing(range, passes);
 
   return range;
 }
@@ -862,27 +852,6 @@ function detectCheapestRaiseLevel(auction, seat) {
     return lastOppBefore.level;
   }
   return lastOppBefore.level + 1;
-}
-
-/**
- * Check whether partner's first bid was an overcall (opponents bid first).
- * @param {Auction} auction
- * @param {Seat} seat
- * @returns {boolean}
- */
-function didPartnerOvercall(auction, seat) {
-  const partner = PARTNER_SEAT[seat];
-  const dealerIdx = SEATS.indexOf(auction.dealer);
-  let oppBidSeen = false;
-  for (let i = 0; i < auction.bids.length; i++) {
-    const s = SEATS[(dealerIdx + i) % SEATS.length];
-    const b = auction.bids[i];
-    if (b.type === 'contract') {
-      if (s !== seat && s !== partner) oppBidSeen = true;
-      if (s === partner) return oppBidSeen;
-    }
-  }
-  return false;
 }
 
 // ═════════════════════════════════════════════════════════════════════

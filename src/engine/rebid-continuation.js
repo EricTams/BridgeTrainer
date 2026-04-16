@@ -15,7 +15,13 @@ import {
   findPartnerBid, findOwnBid, isOpener,
   partnerPassCount,
 } from './context.js';
-import { firstBidMeaning } from './bid-meaning.js';
+import {
+  firstBidRangeInAuction,
+  applyRebidRangeNarrowing,
+  applyCompetitiveRaiseCap,
+  applyPassRangeNarrowing,
+  jacoby2NTOpenerRebidMeaning,
+} from './bid-meaning.js';
 
 /**
  * @typedef {import('../model/hand.js').Hand} Hand
@@ -423,73 +429,29 @@ function contEstimatePartnerRange(auction, seat) {
   if (!partnerFirst) return { min: 0, max: 0 };
 
   const partnerOpened = isOpener(auction, partner);
+  const ownFirst = findOwnBid(auction, seat);
   const { level, strain } = partnerFirst;
 
   /** @type {{ min: number, max: number }} */
-  let range;
+  let range = firstBidRangeInAuction(auction, partner);
 
-  if (partnerOpened) {
-    const m = firstBidMeaning(partnerFirst, { isOpener: true, partnerFirstBid: null });
-    range = { min: m.minHcp, max: m.maxHcp };
-  } else {
-    const base = firstBidMeaning(partnerFirst, {
-      isOpener: false,
-      partnerFirstBid: findOwnBid(auction, seat),
-    });
-    range = { min: base.minHcp, max: base.maxHcp };
-    if (strain === Strain.NOTRUMP) {
-      if (level === 2) {
-        // Check for Jacoby 2NT: partner bid 2NT over our 1M opening
-        const ownFirst = findOwnBid(auction, seat);
-        if (ownFirst && ownFirst.level === 1 && isMajor(ownFirst.strain) &&
-            isOpener(auction, seat)) {
-          // Jacoby 2NT — game-forcing, 13+ HCP with 4+ trump support
-          range = { min: 13, max: 21 };
-        } else {
-          range = { min: 13, max: 15 };
-        }
-      } else if (level >= 3) {
-        range = { min: 13, max: 17 };
-      }
+  // B-49: if partner was forced to advance our takeout double, the cheapest
+  // action can be essentially broke.
+  const doubledBid = contDetectForcedAdvance(auction, seat);
+  if (doubledBid && !partnerOpened && strain !== Strain.NOTRUMP) {
+    const cheapest = STRAIN_ORDER.indexOf(strain) > STRAIN_ORDER.indexOf(doubledBid.strain)
+      ? doubledBid.level : doubledBid.level + 1;
+    if (level <= cheapest) {
+      range = { min: 0, max: 8 };
+    } else if (level === cheapest + 1) {
+      range = { min: 9, max: 11 };
     } else {
-      const ownFirst = findOwnBid(auction, seat);
-      if (ownFirst && ownFirst.level === 1 && ownFirst.strain === Strain.NOTRUMP &&
-          isOpener(auction, seat) && level === 2 &&
-          (strain === Strain.DIAMONDS || strain === Strain.HEARTS)) {
-        range = { min: 0, max: 15 };
-      } else if (ownFirst && ownFirst.level === 2 && ownFirst.strain === Strain.CLUBS &&
-                 isOpener(auction, seat) &&
-                 strain === Strain.DIAMONDS && level === 2) {
-        // B-42: 2♦ waiting response to our 2♣ opening — 0-7 HCP
-        range = { min: 0, max: 7 };
-      } else if (ownFirst && ownFirst.strain === strain) {
-        range = level <= ownFirst.level + 1 ? { min: 6, max: 10 } : { min: 10, max: 12 };
-      } else {
-        // B-49: If partner was forced to advance our takeout double,
-        // their minimum bid could be 0 HCP — don't credit constructive values
-        const doubledBid = contDetectForcedAdvance(auction, seat);
-        if (doubledBid) {
-          const cheapest = STRAIN_ORDER.indexOf(strain) > STRAIN_ORDER.indexOf(doubledBid.strain)
-            ? doubledBid.level : doubledBid.level + 1;
-          if (level <= cheapest) {
-            range = { min: 0, max: 8 };
-          } else if (level === cheapest + 1) {
-            range = { min: 9, max: 11 };
-          } else {
-            range = { min: 12, max: 17 };
-          }
-        } else if (level >= 2) {
-          range = { min: 10, max: 17 };
-        } else {
-          range = { min: 6, max: 17 };
-        }
-      }
+      range = { min: 12, max: 17 };
     }
   }
 
   // Jacoby 2NT: I responded 2NT to partner's 1M opening.
   // Partner's rebids have specific, narrow meanings that override generic narrowing.
-  const ownFirst = findOwnBid(auction, seat);
   if (partnerOpened && isMajor(strain) && level === 1 &&
       ownFirst && ownFirst.level === 2 && ownFirst.strain === Strain.NOTRUMP) {
     range = narrowByJacobyContext(range, partnerFirst, auction, seat);
@@ -540,8 +502,7 @@ function contEstimatePartnerRange(auction, seat) {
     if (isRaiseOfAgreedSuit) {
       const cheapest = contDetectCheapestPartnerLevel(auction, seat);
       if (cheapest !== null && partnerLast.level <= cheapest) {
-        const mid = Math.floor((range.min + range.max) / 2);
-        range = { min: range.min, max: Math.min(range.max, mid + 1) };
+        range = applyCompetitiveRaiseCap(range);
       }
     }
   }
@@ -551,7 +512,7 @@ function contEstimatePartnerRange(auction, seat) {
     const partnerPrev = contFindPartnerPrevBid(auction, seat);
     const prevLevelInSuit = (partnerPrev && partnerPrev.strain === partnerLast.strain)
       ? partnerPrev.level : undefined;
-    range = narrowByRebid(range, partnerFirst, partnerLast, partnerOpened, prevLevelInSuit);
+    range = applyRebidRangeNarrowing(range, partnerFirst, partnerLast, partnerOpened, prevLevelInSuit);
   }
 
   range = narrowByPartnerPasses(range, auction, seat);
@@ -578,10 +539,7 @@ function narrowByPartnerPasses(range, auction, seat) {
   if (!partnerBid) {
     return { min: range.min, max: Math.min(range.max, 12) };
   }
-
-  const reduction = passes * 2;
-  const newMax = Math.max(range.min, range.max - reduction);
-  return { min: range.min, max: newMax };
+  return applyPassRangeNarrowing(range, passes);
 }
 
 /**
@@ -617,23 +575,13 @@ function narrowByJacobyContext(base, partnerFirst, auction, seat) {
     }
     if (foundOur2NT && s === partner && b.type === 'contract') {
       const rebid = /** @type {ContractBid} */ (b);
-      if (rebid.strain === ps && rebid.level === 3) {
-        // 3M = minimum, no shortness
-        return { min, max: Math.min(max, 15) };
-      }
-      if (rebid.strain === Strain.NOTRUMP && rebid.level === 3) {
-        // 3NT = extras, no shortness
-        return { min: Math.max(min, 15), max };
-      }
-      if (rebid.strain === ps && rebid.level >= 4) {
-        // 4M = minimum sign-off
-        return { min, max: Math.min(max, 15) };
-      }
-      if (rebid.level === 3 && rebid.strain !== ps &&
-          rebid.strain !== Strain.NOTRUMP) {
-        // 3-level new suit = shortness (any strength — can't narrow much)
-        return { min, max };
-      }
+      const meaning = jacoby2NTOpenerRebidMeaning(ps, rebid);
+      const narrowed = {
+        min: Math.max(min, meaning.minHcp),
+        max: Math.min(max, meaning.maxHcp),
+      };
+      if (narrowed.max < narrowed.min) narrowed.max = narrowed.min;
+      return narrowed;
       break;
     }
   }
@@ -681,81 +629,6 @@ function narrowByPartnerJacobyBids(base, auction, seat) {
         min = Math.max(min, 16);
       }
     }
-  }
-  return { min, max };
-}
-
-/**
- * Narrow partner's range based on what their second bid reveals.
- * @param {{ min: number, max: number }} base
- * @param {ContractBid} first
- * @param {ContractBid} last
- * @param {boolean} opened
- * @param {number} [prevLevelInSuit] - Level of partner's second-to-last bid
- *   in the same suit as `last`, used to detect gradual escalation vs real jumps
- * @returns {{ min: number, max: number }}
- */
-function narrowByRebid(base, first, last, opened, prevLevelInSuit) {
-  let { min, max } = base;
-  const jumpRef = prevLevelInSuit !== undefined ? prevLevelInSuit : first.level;
-
-  if (opened && first.level === 1 && first.strain !== Strain.NOTRUMP) {
-    if (last.strain === Strain.NOTRUMP && last.level === 1) {
-      return { min: Math.max(min, 12), max: Math.min(max, 14) };
-    }
-    if (last.strain === first.strain) {
-      const isJump = last.level >= jumpRef + 2;
-      if (isJump) return { min: Math.max(min, 17), max };
-      return { min, max: Math.min(max, 16) };
-    }
-    if (last.strain === Strain.NOTRUMP && last.level === 2) {
-      return { min: Math.max(min, 18), max: Math.min(max, 19) };
-    }
-    if (last.strain === Strain.NOTRUMP && last.level >= 3) {
-      return { min: Math.max(min, 19), max };
-    }
-    if (last.strain !== Strain.NOTRUMP && last.strain !== first.strain) {
-      const isReverse = last.level === 2 &&
-        STRAIN_ORDER.indexOf(last.strain) > STRAIN_ORDER.indexOf(first.strain);
-      if (isReverse) return { min: Math.max(min, 17), max };
-      if (last.level >= 3 && last.strain !== first.strain) {
-        return { min: Math.max(min, 17), max };
-      }
-      return { min, max: Math.min(max, 18) };
-    }
-  }
-
-  if (!opened) {
-    if (last.strain === Strain.NOTRUMP && last.level === 2) {
-      return { min: Math.max(min, 10), max: Math.min(max, 12) };
-    }
-    if (last.strain === Strain.NOTRUMP && last.level >= 3) {
-      return { min: Math.max(min, 13), max };
-    }
-    if (last.strain !== Strain.NOTRUMP && last.strain === first.strain) {
-      const isJump = last.level >= jumpRef + 2;
-      if (isJump) return { min: Math.max(min, 10), max };
-      return { min, max: Math.min(max, 10) };
-    }
-    if (last.strain !== Strain.NOTRUMP && last.strain !== first.strain) {
-      return { min: Math.max(min, 10), max };
-    }
-  }
-
-  // Responder returning to opener's first suit at the cheapest level (preference bid)
-  // signals minimum values — cap the top of range
-  if (!opened && first.strain !== Strain.NOTRUMP && last.strain !== first.strain) {
-    const firstIdx = STRAIN_ORDER.indexOf(first.strain);
-    const lastIdx = STRAIN_ORDER.indexOf(last.strain);
-    if (last.strain !== Strain.NOTRUMP &&
-        ((lastIdx > firstIdx && last.level === first.level) ||
-         (lastIdx <= firstIdx && last.level === first.level + 1))) {
-      return { min, max: Math.min(max, 10) };
-    }
-  }
-
-  if (last.level >= jumpRef + 2 && last.strain === first.strain) {
-    min = Math.max(min, min + 2);
   }
   return { min, max };
 }

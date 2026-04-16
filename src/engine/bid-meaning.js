@@ -1,4 +1,4 @@
-import { Strain } from '../model/bid.js';
+import { Strain, STRAIN_ORDER } from '../model/bid.js';
 import { SEATS } from '../model/deal.js';
 
 /**
@@ -15,6 +15,8 @@ import { SEATS } from '../model/deal.js';
  *   maxHcp: number,
  *   forcing: ForcingStatus,
  * }} BidMeaning
+ *
+ * @typedef {{ min: number, max: number }} HcpRange
  */
 
 /** @type {Readonly<Record<Seat, Seat>>} */
@@ -151,6 +153,142 @@ export function plannedDoubleMeaning(oppBid) {
     maxHcp: 37,
     forcing: 'none',
   };
+}
+
+/**
+ * Canonical first-bid range for a seat in auction context.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {HcpRange}
+ */
+export function firstBidRangeInAuction(auction, seat) {
+  const meaning = firstBidMeaningInAuction(auction, seat);
+  return { min: meaning.minHcp, max: meaning.maxHcp };
+}
+
+/**
+ * Canonical second-bid range narrowing. Used by all partner-range estimators.
+ * @param {HcpRange} base
+ * @param {ContractBid} first
+ * @param {ContractBid} rebid
+ * @param {boolean} opened
+ * @param {number} [prevLevelInSuit]
+ * @returns {HcpRange}
+ */
+export function applyRebidRangeNarrowing(base, first, rebid, opened, prevLevelInSuit) {
+  let { min, max } = base;
+  const jumpRef = prevLevelInSuit !== undefined ? prevLevelInSuit : first.level;
+
+  if (opened && first.level === 1 && first.strain !== Strain.NOTRUMP) {
+    if (rebid.strain === Strain.NOTRUMP && rebid.level === 1) {
+      return { min: Math.max(min, 12), max: Math.min(max, 14) };
+    }
+    if (rebid.strain === first.strain) {
+      const isJump = rebid.level >= jumpRef + 2;
+      if (isJump) return { min: Math.max(min, 17), max };
+      return { min, max: Math.min(max, 16) };
+    }
+    if (rebid.strain === Strain.NOTRUMP && rebid.level === 2) {
+      return { min: Math.max(min, 18), max: Math.min(max, 19) };
+    }
+    if (rebid.strain === Strain.NOTRUMP && rebid.level >= 3) {
+      return { min: Math.max(min, 19), max };
+    }
+    if (rebid.strain !== Strain.NOTRUMP && rebid.strain !== first.strain) {
+      const isReverse = rebid.level === 2 &&
+        STRAIN_ORDER.indexOf(rebid.strain) > STRAIN_ORDER.indexOf(first.strain);
+      if (isReverse) return { min: Math.max(min, 17), max };
+      if (rebid.level >= 3) return { min: Math.max(min, 17), max };
+      return { min, max: Math.min(max, 18) };
+    }
+  }
+
+  if (!opened) {
+    if (rebid.strain === Strain.NOTRUMP && rebid.level === 2) {
+      return { min: Math.max(min, 10), max: Math.min(max, 12) };
+    }
+    if (rebid.strain === Strain.NOTRUMP && rebid.level >= 3) {
+      return { min: Math.max(min, 13), max };
+    }
+    if (rebid.strain !== Strain.NOTRUMP && rebid.strain === first.strain) {
+      const isJump = rebid.level >= jumpRef + 2;
+      if (isJump) return { min: Math.max(min, 10), max };
+      return { min, max: Math.min(max, 10) };
+    }
+    if (rebid.strain !== Strain.NOTRUMP && rebid.strain !== first.strain) {
+      return { min: Math.max(min, 10), max };
+    }
+  }
+
+  if (!opened && first.strain !== Strain.NOTRUMP && rebid.strain !== first.strain) {
+    const firstIdx = STRAIN_ORDER.indexOf(first.strain);
+    const rebidIdx = STRAIN_ORDER.indexOf(rebid.strain);
+    const isCheapestPreference =
+      rebid.strain !== Strain.NOTRUMP &&
+      ((rebidIdx > firstIdx && rebid.level === first.level) ||
+       (rebidIdx <= firstIdx && rebid.level === first.level + 1));
+    if (isCheapestPreference) return { min, max: Math.min(max, 10) };
+  }
+
+  if (rebid.level >= jumpRef + 2 && rebid.strain === first.strain) {
+    return { min: min + 2, max };
+  }
+  return { min, max };
+}
+
+/**
+ * Canonical cap for cheapest-level competitive raises (LOTT style).
+ * @param {HcpRange} range
+ * @returns {HcpRange}
+ */
+export function applyCompetitiveRaiseCap(range) {
+  const mid = Math.floor((range.min + range.max) / 2);
+  return { min: range.min, max: Math.min(range.max, mid + 1) };
+}
+
+/**
+ * Canonical pass-based negative inference.
+ * @param {HcpRange} range
+ * @param {number} passCount
+ * @returns {HcpRange}
+ */
+export function applyPassRangeNarrowing(range, passCount) {
+  if (passCount <= 0) return range;
+  const reduction = passCount * 2;
+  return { min: range.min, max: Math.max(range.min, range.max - reduction) };
+}
+
+/**
+ * Check if the seat's first contract action was an overcall.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @returns {boolean}
+ */
+export function isOvercallFirstBid(auction, seat) {
+  const meaning = firstBidMeaningInAuction(auction, seat);
+  return meaning.role.startsWith('overcall-');
+}
+
+/**
+ * Canonical interpretation of opener's rebid after Jacoby 2NT.
+ * @param {import('../model/bid.js').Strain} agreedMajor
+ * @param {ContractBid} rebid
+ * @returns {BidMeaning}
+ */
+export function jacoby2NTOpenerRebidMeaning(agreedMajor, rebid) {
+  if (rebid.strain === agreedMajor && rebid.level === 3) {
+    return { role: 'jacoby-opener-minimum', minHcp: 13, maxHcp: 15, forcing: 'none' };
+  }
+  if (rebid.strain === Strain.NOTRUMP && rebid.level === 3) {
+    return { role: 'jacoby-opener-extras', minHcp: 15, maxHcp: 21, forcing: 'none' };
+  }
+  if (rebid.strain === agreedMajor && rebid.level >= 4) {
+    return { role: 'jacoby-opener-signoff', minHcp: 13, maxHcp: 15, forcing: 'none' };
+  }
+  if (rebid.level === 3 && rebid.strain !== agreedMajor && rebid.strain !== Strain.NOTRUMP) {
+    return { role: 'jacoby-opener-shortness', minHcp: 13, maxHcp: 21, forcing: 'none' };
+  }
+  return { role: 'jacoby-opener-unknown', minHcp: 13, maxHcp: 21, forcing: 'none' };
 }
 
 /**
