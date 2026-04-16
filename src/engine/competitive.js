@@ -48,6 +48,7 @@ const OC_2_MAX_HCP = 16;
 const OC_MIN_LEN = 5;
 const OC_HONOR_MIN = 2;
 const OC_PASS_HCP_COST = 2;
+const BALANCE_PASS_HCP_COST = 1;
 const OC_PASS_SUIT_COST = 1.5;
 const OC_OPP_SUIT_COST = 15;
 
@@ -318,23 +319,23 @@ function scoreDirectPass(bid, hand, eval_, oppBid, balancing) {
     // B-44: At 4+ level, balancing discount doesn't apply (not a 1-2 level
     // "partner's trapped values" situation) and pass threshold is raised
     const passAdj = oppBid.level >= 4 ? 0 : adj;
-    const levelThresholdAdj = Math.max(0, oppBid.level - 2) * 2;
-    const threshold = OC_1_MIN_HCP - passAdj + levelThresholdAdj;
-    const levelExtra = Math.max(0, oppBid.level - 1) * DBL_LEVEL_HCP_STEP;
+    const threshold = overcallReqs(Math.max(1, oppBid.level), passAdj).minHcp;
     const oppLen = suitLen(shape, oppBid.strain);
     const dblShapeAdj = oppLen === 0 ? IDEAL_TAKEOUT_VOID_BONUS : (oppLen === 1 ? 1 : 0);
     const dMeaning = plannedDoubleMeaning(oppBid);
     const dblMinHcp = Math.max(10, dMeaning.minHcp - adj - dblShapeAdj);
     if (hcp >= threshold) {
+      const bestStrain = bestSuitExcluding(shape, oppBid.strain);
       const bestLen = longestNonOppSuit(shape, oppBid.strain);
-      const hasOcSuit = bestLen >= OC_MIN_LEN;
-      if (hasOcSuit && hasOvercallQuality(hand, bestSuitExcluding(shape, oppBid.strain))) {
-        pen(p, `${hcp} HCP with ${bestLen}-card suit: consider overcalling`,
-          (hcp - threshold + 1) * OC_PASS_HCP_COST);
+      const hasOcQuality = bestLen >= OC_MIN_LEN && hasOvercallQuality(hand, bestStrain);
+      if (hasOcQuality) {
+        const suitPush = Math.max(1, bestLen - OC_MIN_LEN + 1) * OC_PASS_SUIT_COST;
+        pen(p, `${bestLen}-card suit with quality: consider overcalling`, suitPush);
       }
       const hasDblAction = hcp >= dblMinHcp && hasTakeoutShape(shape, oppBid.strain);
-      const passHcpPen = Math.max(0, hcp - threshold) * OC_PASS_HCP_COST;
-      if (hasOcSuit || hasDblAction) {
+      const hcpPush = balancing ? BALANCE_PASS_HCP_COST : OC_PASS_HCP_COST;
+      const passHcpPen = Math.max(0, hcp - threshold) * hcpPush;
+      if (hasOcQuality || hasDblAction) {
         pen(p, `${hcp} HCP above pass threshold (${threshold})`, passHcpPen);
       } else if (passHcpPen > 0) {
         pen(p, `${hcp} HCP above pass threshold (${threshold})`,
@@ -1861,7 +1862,7 @@ function overcallReqs(level, adj) {
     return { minHcp: OC_2_MIN_HCP - effAdj, maxHcp: OC_2_MAX_HCP, minLen: OC_MIN_LEN, lenShortMult: LENGTH_SHORT_COST };
   }
   if (level === 3) {
-    return { minHcp: OC_3_MIN_HCP - effAdj, maxHcp: OC_2_MAX_HCP, minLen: OC_3_MIN_LEN, lenShortMult: LENGTH_SHORT_COST + 1 };
+    return { minHcp: OC_3_MIN_HCP - effAdj, maxHcp: OC_2_MAX_HCP, minLen: OC_3_MIN_LEN, lenShortMult: LENGTH_SHORT_COST + 2 };
   }
   if (level === 4) {
     return { minHcp: OC_4_MIN_HCP - effAdj, maxHcp: 18, minLen: OC_4_MIN_LEN, lenShortMult: LENGTH_SHORT_COST + 2 };

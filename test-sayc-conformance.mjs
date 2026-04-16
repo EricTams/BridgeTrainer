@@ -139,6 +139,15 @@ const SCENARIOS = [
     note: 'Classic takeout shape over 1H should double.',
   },
   {
+    id: 'C-balance-over-3c-preempt',
+    dealer: 'W',
+    calls: ['3C', 'P', 'P'],
+    hand: 'A4.AK973.KJ85.75',
+    expectedTop: ['X'],
+    forbidTop: ['P'],
+    note: 'Balancing over 3♣ with values and short clubs should prefer takeout double to pass.',
+  },
+  {
     id: 'C-advance-takeout-double',
     dealer: 'N',
     calls: ['1H', 'X'],
