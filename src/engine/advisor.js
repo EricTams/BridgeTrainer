@@ -8,6 +8,7 @@ import { getRebidBids, getContinuationBids, getResponderRebidBids } from './rebi
 import { getCompetitiveBids, getCompetitiveResponseBids, getPostDoubleBids } from './competitive.js';
 import { getConventionResponse, getSlamInitiationBids } from './conventions.js';
 import { getContestBids } from './contest.js';
+import { interpretAuctionState } from '../engine-v2/semantics/interpreter.js';
 
 /**
  * @typedef {import('./opening.js').BidRecommendation} BidRecommendation
@@ -25,6 +26,9 @@ import { getContestBids } from './contest.js';
  */
 export function getRecommendations(hand, auction, seat) {
   const eval_ = evaluate(hand);
+  // AIDEV-NOTE: v2 semantic interpreter currently runs in diagnostics mode.
+  // It must not affect recommendations until constraint/rule migration begins.
+  maybeRunV2Diagnostics(auction, seat, eval_);
 
   const conventionResp = getConventionResponse(hand, eval_, auction, seat);
   if (conventionResp) return conventionResp;
@@ -154,6 +158,24 @@ export function getRecommendations(hand, auction, seat) {
   }
 
   return results.sort(bidRecCompare);
+}
+
+/**
+ * Read-only diagnostics hook for engine-v2 semantic interpretation.
+ * Controlled by `globalThis.__AIDEV_V2_DIAGNOSTICS__`.
+ * @param {Auction} auction
+ * @param {Seat} seat
+ * @param {ReturnType<typeof evaluate>} eval_
+ * @returns {void}
+ */
+function maybeRunV2Diagnostics(auction, seat, eval_) {
+  if (!globalThis.__AIDEV_V2_DIAGNOSTICS__) return;
+  try {
+    const meaning = interpretAuctionState(auction, seat, eval_);
+    globalThis.__AIDEV_V2_LAST_MEANING__ = meaning;
+  } catch (err) {
+    globalThis.__AIDEV_V2_LAST_MEANING_ERROR__ = String(err?.message || err);
+  }
 }
 
 /**
