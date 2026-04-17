@@ -8,6 +8,7 @@ import { unusualNotrumpPack } from './unusual-notrump.js';
 import { advancerAfterTakeoutDoublePack } from './advancer-after-takeout-double.js';
 import { advancerAfterPenaltyDoublePack } from './advancer-after-penalty-double.js';
 import { negativeDoublePack } from './negative-double.js';
+import { negativeDoubleContinuationsPack } from './negative-double-continuations.js';
 import { fallbackNoopPack } from './fallback-noop.js';
 
 /**
@@ -36,6 +37,7 @@ const CONVENTION_PACKS = Object.freeze([
   competitiveSuitTakeoutDoublePack,
   advancerAfterPenaltyDoublePack,
   advancerAfterTakeoutDoublePack,
+  negativeDoubleContinuationsPack,
   negativeDoublePack,
   fallbackNoopPack,
 ]);

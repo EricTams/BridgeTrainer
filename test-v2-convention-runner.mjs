@@ -133,6 +133,38 @@ const NO_NEGATIVE_DOUBLE_MAJOR_HAND = createHand([
   createCard(Suit.CLUBS, Rank.EIGHT),
 ]);
 
+const NEG_DBL_CONT_INVITE_HAND = createHand([
+  createCard(Suit.SPADES, Rank.KING),
+  createCard(Suit.SPADES, Rank.JACK),
+  createCard(Suit.SPADES, Rank.FOUR),
+  createCard(Suit.HEARTS, Rank.TEN),
+  createCard(Suit.HEARTS, Rank.NINE),
+  createCard(Suit.DIAMONDS, Rank.ACE),
+  createCard(Suit.DIAMONDS, Rank.JACK),
+  createCard(Suit.DIAMONDS, Rank.SEVEN),
+  createCard(Suit.DIAMONDS, Rank.FOUR),
+  createCard(Suit.CLUBS, Rank.QUEEN),
+  createCard(Suit.CLUBS, Rank.EIGHT),
+  createCard(Suit.CLUBS, Rank.SEVEN),
+  createCard(Suit.CLUBS, Rank.FIVE),
+]);
+
+const NEG_DBL_CONT_WEAK_HAND = createHand([
+  createCard(Suit.SPADES, Rank.QUEEN),
+  createCard(Suit.SPADES, Rank.EIGHT),
+  createCard(Suit.SPADES, Rank.FOUR),
+  createCard(Suit.HEARTS, Rank.TEN),
+  createCard(Suit.HEARTS, Rank.SEVEN),
+  createCard(Suit.HEARTS, Rank.SIX),
+  createCard(Suit.DIAMONDS, Rank.KING),
+  createCard(Suit.DIAMONDS, Rank.NINE),
+  createCard(Suit.DIAMONDS, Rank.THREE),
+  createCard(Suit.CLUBS, Rank.JACK),
+  createCard(Suit.CLUBS, Rank.EIGHT),
+  createCard(Suit.CLUBS, Rank.SEVEN),
+  createCard(Suit.CLUBS, Rank.TWO),
+]);
+
 const REOPENING_DOUBLE_HAND = createHand([
   createCard(Suit.SPADES, Rank.ACE),
   createCard(Suit.SPADES, Rank.KING),
@@ -603,6 +635,82 @@ let failures = 0;
     'unusual-notrump pack is shape-gated',
     !hasUnusual2NT,
     `expected no unusual 2NT recommendation without shape, got ${JSON.stringify(recs)}`
+  );
+}
+
+// Test 20: negative-double doubler continuation should prefer bidding unbid major over pass.
+{
+  const hand = createHand([
+    createCard(Suit.SPADES, Rank.JACK),
+    createCard(Suit.HEARTS, Rank.ACE),
+    createCard(Suit.HEARTS, Rank.QUEEN),
+    createCard(Suit.HEARTS, Rank.EIGHT),
+    createCard(Suit.HEARTS, Rank.SIX),
+    createCard(Suit.HEARTS, Rank.FOUR),
+    createCard(Suit.DIAMONDS, Rank.ACE),
+    createCard(Suit.DIAMONDS, Rank.FIVE),
+    createCard(Suit.DIAMONDS, Rank.FOUR),
+    createCard(Suit.CLUBS, Rank.KING),
+    createCard(Suit.CLUBS, Rank.SEVEN),
+    createCard(Suit.CLUBS, Rank.SIX),
+    createCard(Suit.CLUBS, Rank.THREE),
+  ]);
+  let auction = createAuction('N');
+  auction = addBid(auction, contractBid(1, Strain.DIAMONDS)); // N
+  auction = addBid(auction, contractBid(1, Strain.SPADES)); // E
+  auction = addBid(auction, dbl()); // S
+  auction = addBid(auction, pass()); // W
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // N
+  const recs = getConventionRuleRecommendations(hand, auction, seat) || [];
+  const top = recs[0] || null;
+  const topIs2H = !!top &&
+    top.bid.type === 'contract' &&
+    top.bid.level === 2 &&
+    top.bid.strain === Strain.HEARTS;
+  failures += report(
+    'negative-double continuation prefers opener 2H',
+    topIs2H,
+    `expected 2H top continuation after negative double, got ${JSON.stringify(top)}`
+  );
+}
+
+// Test 21: negative-double responder continuation should compete in unbid major.
+{
+  const hand = createHand([
+    createCard(Suit.SPADES, Rank.KING),
+    createCard(Suit.SPADES, Rank.JACK),
+    createCard(Suit.SPADES, Rank.FIVE),
+    createCard(Suit.HEARTS, Rank.KING),
+    createCard(Suit.HEARTS, Rank.QUEEN),
+    createCard(Suit.HEARTS, Rank.EIGHT),
+    createCard(Suit.HEARTS, Rank.SIX),
+    createCard(Suit.DIAMONDS, Rank.ACE),
+    createCard(Suit.DIAMONDS, Rank.JACK),
+    createCard(Suit.DIAMONDS, Rank.SEVEN),
+    createCard(Suit.CLUBS, Rank.QUEEN),
+    createCard(Suit.CLUBS, Rank.EIGHT),
+    createCard(Suit.CLUBS, Rank.FIVE),
+  ]);
+  let auction = createAuction('N');
+  auction = addBid(auction, contractBid(1, Strain.DIAMONDS)); // N
+  auction = addBid(auction, contractBid(1, Strain.SPADES)); // E
+  auction = addBid(auction, dbl()); // S
+  auction = addBid(auction, pass()); // W
+  auction = addBid(auction, contractBid(2, Strain.DIAMONDS)); // N
+  auction = addBid(auction, pass()); // E
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // S
+  const recs = getConventionRuleRecommendations(hand, auction, seat) || [];
+  const top = recs[0] || null;
+  const topIs2H = !!top &&
+    top.bid.type === 'contract' &&
+    top.bid.level === 2 &&
+    top.bid.strain === Strain.HEARTS;
+  failures += report(
+    'negative-double continuation prefers responder 2H',
+    topIs2H,
+    `expected responder 2H continuation after opener rebid, got ${JSON.stringify(top)}`
   );
 }
 
