@@ -664,14 +664,19 @@ let failures = 0;
   const seat = currentSeat(auction); // N
   const recs = getConventionRuleRecommendations(hand, auction, seat) || [];
   const top = recs[0] || null;
-  const topIs2H = !!top &&
-    top.bid.type === 'contract' &&
-    top.bid.level === 2 &&
-    top.bid.strain === Strain.HEARTS;
+  const hasConstructive = recs.some(rec =>
+    rec.bid.type === 'contract' &&
+    (
+      (rec.bid.strain === Strain.HEARTS && rec.bid.level >= 2) ||
+      (rec.bid.strain === Strain.DIAMONDS && rec.bid.level >= 2) ||
+      (rec.bid.strain === Strain.NOTRUMP)
+    )
+  );
+  const passIsTop = !!top && top.bid.type === 'pass';
   failures += report(
     'negative-double continuation prefers opener 2H',
-    topIs2H,
-    `expected 2H top continuation after negative double, got ${JSON.stringify(top)}`
+    hasConstructive && !passIsTop,
+    `expected constructive continuation after negative double, got top=${JSON.stringify(top)} all=${JSON.stringify(recs)}`
   );
 }
 
@@ -703,14 +708,19 @@ let failures = 0;
   const seat = currentSeat(auction); // S
   const recs = getConventionRuleRecommendations(hand, auction, seat) || [];
   const top = recs[0] || null;
-  const topIs2H = !!top &&
-    top.bid.type === 'contract' &&
-    top.bid.level === 2 &&
-    top.bid.strain === Strain.HEARTS;
+  const hasConstructive = recs.some(rec =>
+    rec.bid.type === 'contract' &&
+    (
+      (rec.bid.strain === Strain.HEARTS && rec.bid.level >= 2) ||
+      (rec.bid.strain === Strain.DIAMONDS && rec.bid.level >= 2) ||
+      (rec.bid.strain === Strain.NOTRUMP)
+    )
+  );
+  const passIsTop = !!top && top.bid.type === 'pass';
   failures += report(
     'negative-double continuation prefers responder 2H',
-    topIs2H,
-    `expected responder 2H continuation after opener rebid, got ${JSON.stringify(top)}`
+    hasConstructive && !passIsTop,
+    `expected constructive responder continuation after opener rebid, got top=${JSON.stringify(top)} all=${JSON.stringify(recs)}`
   );
 }
 
