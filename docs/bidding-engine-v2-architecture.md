@@ -299,14 +299,69 @@ Snapshot top recommendation explanation traces for critical convention sequences
 
 ---
 
-## Immediate next implementation tasks
+## Conversion progress update (current implementation snapshot)
 
-1. Create `src/engine-v2/model/semantic-state.js` typedefs and constructors.
-2. Implement `semantics/interpreter.js` that emits `AuctionMeaningState`.
-3. Add a pre-scoring gate in current advisor path:
-   - run hard obligation constraints,
-   - reject structurally invalid candidate bids early.
-4. Add first invariant test file focused on forcing/transfer obligations.
+The migration plan below remains the target path. The items here capture what is
+already implemented in code so the architecture doc stays aligned with reality.
 
-This gives structural value immediately, before full v2 replacement.
+### Completed slices
+
+- **Phase 1 (semantic adapter):**
+  - `src/engine-v2/model/semantic-state.js`
+  - `src/engine-v2/semantics/interpreter.js`
+  - `advisor.js` diagnostics hook + meaning capture
+- **Phase 2 (hard constraints):**
+  - forcing/obligation gating via `src/engine-v2/constraints/forcing.js`
+  - obligation registry in `src/engine-v2/constraints/obligation-rules.js`
+  - hard-obligation candidate scoping and synthesis
+- **Phase 3 (convention pack extraction):**
+  - pack registry/dispatch:
+    - `src/engine-v2/rules/conventions/runner.js`
+  - NT family:
+    - `nt-stayman-transfers` with modular stayman/transfer scoring
+  - competitive doubles family (incremental extraction):
+    - `competitive-nt-penalty-double`
+    - `competitive-suit-takeout-double`
+    - `reopening-double`
+    - `negative-double`
+    - `advancer-after-penalty-double`
+    - `advancer-after-takeout-double`
+  - shared helpers:
+    - `advancer-shared.js` (active-partner-double windows, shared thresholds)
+
+### Validation posture in repo
+
+- Structural invariant harness:
+  - `test-v2-invariants.mjs`
+- Convention runner harness:
+  - `test-v2-convention-runner.mjs`
+- Existing broad regressions retained:
+  - `test-sayc-conformance.mjs`
+  - `test-transfer-dead.mjs`
+  - `test-doubled-opening-response.mjs`
+  - `test-slam-deals.mjs`
+  - `test-overbid.mjs`
+
+### Remaining high-value conversion targets (next grouped work)
+
+- Continue Phase 3 extraction in **competitive convention windows** not yet
+  represented as dedicated packs (e.g. selected overcall/convention families).
+- Start **Phase 4 unification** by reducing duplicated competitive scoring
+  paths behind role-parameterized rule packs.
+- Keep differential/regression checks active while replacing v1 islands.
+
+---
+
+## Immediate next implementation tasks (updated)
+
+1. Continue Phase 3 extraction for remaining competitive convention families
+   (focused overcall/convention windows with narrow `when(...)` guards).
+2. Expand dedicated convention-pack tests for new windows as they are extracted
+   (keep pack ordering and gating deterministic).
+3. Progress Phase 4 by consolidating duplicated competitive scoring branches
+   behind shared role-parameterized helpers/rule packs.
+4. Keep structural invariants + corpus/differential regression runs mandatory
+   for each conversion batch.
+
+This keeps migration momentum while preserving behavioral stability.
 

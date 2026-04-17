@@ -1,4 +1,4 @@
-import { Strain, isLegalBid, pass } from '../../../model/bid.js';
+import { Strain, dbl, isLegalBid, pass } from '../../../model/bid.js';
 import {
   findLastDoubledBid,
   findOpponentBid,
@@ -71,6 +71,56 @@ export function hasClassicTakeoutShape(shape, oppStrain) {
 }
 
 /**
+ * Shared negative-double window helper.
+ * @param {ConventionContext} ctx
+ * @returns {{ oppBid: import('../../../model/bid.js').ContractBid, partnerStrain: 'C'|'D'|'H'|'S' } | null}
+ */
+export function getNegativeDoubleWindow(ctx) {
+  if (ctx.phase !== 'responding') return null;
+  if (ctx.myFirst) return null;
+  if (!ctx.partnerFirst) return null;
+  if (ctx.partnerFirst.level !== 1 || ctx.partnerFirst.strain === Strain.NOTRUMP) return null;
+  if (countContractBids(ctx.auction) !== 2) return null;
+
+  const oppBid = findOpponentBid(ctx.auction, ctx.seat);
+  if (!oppBid || oppBid.strain === Strain.NOTRUMP) return null;
+  if (oppBid.level > 2) return null;
+  if (!isLegalBid(ctx.auction, dbl())) return null;
+  return {
+    oppBid,
+    partnerStrain: ctx.partnerFirst.strain,
+  };
+}
+
+/**
+ * Shared helper for unbid majors in negative-double windows.
+ * @param {'C'|'D'|'H'|'S'} partnerStrain
+ * @param {'C'|'D'|'H'|'S'} oppStrain
+ * @returns {Array<'H'|'S'>}
+ */
+export function unbidMajors(partnerStrain, oppStrain) {
+  /** @type {Array<'H'|'S'>} */
+  const majors = [Strain.HEARTS, Strain.SPADES];
+  return majors.filter(major => major !== partnerStrain && major !== oppStrain);
+}
+
+/**
+ * Shared level-based negative-double threshold.
+ * @param {number} oppLevel
+ * @param {number[]} shape
+ * @returns {number}
+ */
+export function negativeDoubleMinHcp(oppLevel, shape) {
+  const NEG_DBL_1_MIN_HCP = 6;
+  const NEG_DBL_2_MIN_HCP = 8;
+  const NEG_DBL_3_MIN_HCP = 10;
+  const DIST_SHAPE_DISCOUNT = 1;
+  const base = oppLevel === 1 ? NEG_DBL_1_MIN_HCP : oppLevel === 2 ? NEG_DBL_2_MIN_HCP : NEG_DBL_3_MIN_HCP;
+  const distAdj = shape.some(len => len === 0) ? DIST_SHAPE_DISCOUNT : 0;
+  return Math.max(5, base - distAdj);
+}
+
+/**
  * @param {number[]} shape
  * @param {'C'|'D'|'H'|'S'} oppStrain
  * @returns {number}
@@ -95,5 +145,17 @@ function suitLen(shape, strain) {
   if (strain === Strain.HEARTS) return shape[1];
   if (strain === Strain.DIAMONDS) return shape[2];
   return shape[3];
+}
+
+/**
+ * @param {import('../../../model/bid.js').Auction} auction
+ * @returns {number}
+ */
+function countContractBids(auction) {
+  let count = 0;
+  for (const bid of auction.bids) {
+    if (bid.type === 'contract') count++;
+  }
+  return count;
 }
 
