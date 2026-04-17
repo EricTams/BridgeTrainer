@@ -12,7 +12,7 @@ import {
 } from './src/model/bid.js';
 import { readFileSync } from 'node:fs';
 import { getRecommendations } from './src/engine/advisor.js';
-import { RULES, setInheritedCompatibilityMap } from './src/engine/ruleset.js';
+import { RULES } from './src/engine/ruleset.js';
 
 /**
  * @typedef {{
@@ -74,39 +74,6 @@ function handFromDotString(dot) {
     }
   }
   return createHand(cards);
-}
-
-/**
- * Canonical C.D.H.S dot format matching engine-side lookup key generation.
- * @param {import('./src/model/hand.js').Hand} hand
- * @returns {string}
- */
-function handToCdhsCanonical(hand) {
-  /** @type {Record<number, string>} */
-  const rankChar = {
-    [Rank.ACE]: 'A',
-    [Rank.KING]: 'K',
-    [Rank.QUEEN]: 'Q',
-    [Rank.JACK]: 'J',
-    [Rank.TEN]: 'T',
-    9: '9',
-    8: '8',
-    7: '7',
-    6: '6',
-    5: '5',
-    4: '4',
-    3: '3',
-    2: '2',
-  };
-  const bySuit = { C: [], D: [], H: [], S: [] };
-  for (const card of hand.cards) {
-    bySuit[card.suit].push(card.rank);
-  }
-  const suitString = suit => bySuit[suit]
-    .sort((a, b) => b - a)
-    .map(rank => rankChar[rank])
-    .join('');
-  return `${suitString('C')}.${suitString('D')}.${suitString('H')}.${suitString('S')}`;
 }
 
 /**
@@ -210,21 +177,6 @@ function parseInheritedGroups() {
   return groups;
 }
 
-/**
- * @param {InheritedCase[]} allCases
- * @returns {ReadonlyMap<string, string>}
- */
-function buildCompatibilityMap(allCases) {
-  /** @type {Map<string, string>} */
-  const map = new Map();
-  for (const c of allCases) {
-    const canonicalHand = handToCdhsCanonical(handFromDotString(c.hand));
-    const expectedCode = c.expected === '??' ? 'P' : c.expected.replace('NT', 'N');
-    map.set(`${canonicalHand}||${c.history}`, expectedCode);
-  }
-  return map;
-}
-
 const parsedGroups = parseInheritedGroups();
 const groupCap = GROUP_LIMIT > 0 ? GROUP_LIMIT : parsedGroups.length;
 const limitedGroups = parsedGroups.slice(0, groupCap);
@@ -238,8 +190,6 @@ for (const [group, tuples] of limitedGroups) {
   }
   if (CASE_LIMIT > 0 && cases.length >= CASE_LIMIT) break;
 }
-
-setInheritedCompatibilityMap(buildCompatibilityMap(cases));
 
 let passCount = 0;
 let failCount = 0;

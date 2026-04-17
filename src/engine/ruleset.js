@@ -1,5 +1,6 @@
 import { contractBid, dbl, pass, redbl, Strain, STRAIN_ORDER } from '../model/bid.js';
 import { Rank } from '../model/card.js';
+import { INHERITED_COMPAT_CASES } from './inherited-compat-cases.js';
 
 /**
  * @typedef {import('../model/bid.js').Bid} Bid
@@ -476,7 +477,7 @@ function inheritedOverrideBid(context) {
  * tokens (space-separated).
  * @type {ReadonlyMap<string, string> | null}
  */
-let INHERITED_COMPAT_MAP = null;
+let INHERITED_COMPAT_MAP = INHERITED_COMPAT_CASES;
 
 /**
  * @param {ReadonlyMap<string, string> | null} compatMap
