@@ -12,6 +12,7 @@ import {
  */
 
 const NEG_DBL_MAJOR_LEN = 4;
+const NATURAL_MAJOR_PREFERENCE_LEN = 5;
 
 /**
  * @param {ConventionContext} ctx
@@ -25,6 +26,7 @@ function shouldUseNegativeDoublePack(ctx) {
   if (unbid.length === 0) return false;
   const bestMajorLen = Math.max(...unbid.map(suit => suitLen(ctx.eval_.shape, suit)));
   if (bestMajorLen < NEG_DBL_MAJOR_LEN) return false;
+  if (preferNaturalMajorBid(ctx, window, unbid)) return false;
 
   const minHcp = negativeDoubleMinHcp(window.oppBid.level, ctx.eval_.shape);
   return ctx.eval_.hcp >= minHcp;
@@ -69,3 +71,35 @@ export const negativeDoublePack = {
   when: shouldUseNegativeDoublePack,
   run: runNegativeDoublePack,
 };
+
+/**
+ * With a clear 5+ card unbid major that can be bid naturally,
+ * prefer that direct major action over a shape-showing negative double.
+ * @param {ConventionContext} ctx
+ * @param {{ oppBid: import('../../../model/bid.js').ContractBid, partnerStrain: 'C'|'D'|'H'|'S' }} window
+ * @param {Array<'H'|'S'>} unbid
+ * @returns {boolean}
+ */
+function preferNaturalMajorBid(ctx, window, unbid) {
+  /** @type {Array<'H'|'S'>} */
+  const naturalMajors = unbid.filter(s => suitLen(ctx.eval_.shape, s) >= NATURAL_MAJOR_PREFERENCE_LEN);
+  if (naturalMajors.length !== 1) return false;
+  const major = naturalMajors[0];
+  const level = nextLevelForStrain(window.oppBid, major);
+  if (level <= 0 || level > 7) return false;
+  return isLegalBid(ctx.auction, { type: 'contract', level, strain: major });
+}
+
+/**
+ * @param {import('../../../model/bid.js').ContractBid} floor
+ * @param {'H'|'S'} strain
+ * @returns {number}
+ */
+function nextLevelForStrain(floor, strain) {
+  const order = [Strain.CLUBS, Strain.DIAMONDS, Strain.HEARTS, Strain.SPADES, Strain.NOTRUMP];
+  const floorIdx = order.indexOf(floor.strain);
+  const targetIdx = order.indexOf(strain);
+  if (floorIdx < 0 || targetIdx < 0) return 0;
+  if (targetIdx > floorIdx) return floor.level;
+  return floor.level + 1;
+}

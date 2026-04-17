@@ -37,8 +37,8 @@ const CONVENTION_PACKS = Object.freeze([
   competitiveSuitTakeoutDoublePack,
   advancerAfterPenaltyDoublePack,
   advancerAfterTakeoutDoublePack,
-  negativeDoubleContinuationsPack,
   negativeDoublePack,
+  negativeDoubleContinuationsPack,
   fallbackNoopPack,
 ]);
 
