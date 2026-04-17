@@ -56,6 +56,7 @@ export const NEW_SUIT_MIN = 4;
 export const SUPER_ACCEPT_SUPPORT = 4;
 export const SUPER_ACCEPT_HCP = 17;
 export const NT_ACCEPT_HCP = 16;
+export const NT_BORDERLINE_ACCEPT_HCP = 15;
 
 export const RAISE_PASS_MAX = 14;
 export const RAISE_INV_MIN = 15;

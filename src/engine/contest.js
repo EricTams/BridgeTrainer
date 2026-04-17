@@ -464,6 +464,12 @@ function scoreContestPreference(bid, eval_, oppBid, fitInfo) {
   if (support < 3) {
     pen(p, `Only ${support} ${name}: thin support`, (3 - support) * 1.5);
   }
+  if (support === 2 && level >= 3) {
+    pen(p, `2-card ${name} support at ${level}-level: prefer passing with minimum`, 2.5);
+  }
+  if (support === 2 && hcp <= 6) {
+    pen(p, `${hcp} HCP with only 2-card support: avoid stretching preference`, 2);
+  }
 
   if (level >= 4) {
     pen(p, `Level ${level}: high for preference`, (level - 3) * 3);
