@@ -966,6 +966,8 @@ function contScorePreference(bid, eval_, strain, combinedMin, combinedMax, partn
   const combinedMid = (effMin + combinedMax) / 2;
   const gameLevel = strain === Strain.NOTRUMP ? 3 : isMajor(strain) ? 4 : 5;
   const gameThreshold = contGameThreshold(strain);
+  const isMajorStrain = isMajor(strain);
+  const weakMajorPreference = isMajorStrain && level === 3 && hcp <= 7;
 
   /** @type {PenaltyItem[]} */
   const p = [];
@@ -973,7 +975,10 @@ function contScorePreference(bid, eval_, strain, combinedMin, combinedMax, partn
   if (support <= 1) {
     pen(p, `Only ${support} ${name}: singleton/void preference is dangerous`, 6);
   } else if (support < CONT_FIT_SUPPORT) {
-    pen(p, `Only ${support} ${name}: thin preference`, (CONT_FIT_SUPPORT - support) * 1.5);
+    pen(p, `Only ${support} ${name}: thin preference`, (CONT_FIT_SUPPORT - support) * 2.5);
+    if (level >= 3) {
+      pen(p, `Thin ${support}-card preference at ${level}-level: often better to settle`, 1.5);
+    }
   }
   if (priorCount >= 1) {
     pen(p, `Already showed ${name} preference ${priorCount} time${priorCount > 1 ? 's' : ''}: settle`,
@@ -988,6 +993,11 @@ function contScorePreference(bid, eval_, strain, combinedMin, combinedMax, partn
   }
   if (level >= 4) {
     pen(p, `Level ${level}: high for preference`, (level - 3) * 2);
+  }
+  if (weakMajorPreference) {
+    // With weak values in a major preference window, treat 3M as optional
+    // rather than mandatory; this avoids over-competing when pass is normal.
+    pen(p, `Weak hand (${hcp} HCP): avoid automatic 3-level major preference`, 2);
   }
   if (isGameLevel(/** @type {ContractBid} */ (bid)) && combinedMid < gameThreshold) {
     pen(p, `Below game values (need ~${gameThreshold}) for ${level}${sym}`,
