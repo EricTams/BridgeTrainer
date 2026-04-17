@@ -38,6 +38,7 @@ const RR_GF_PASS_COST = 15;
 const RR_TRANSFER_INV_MIN = 8;
 const RR_TRANSFER_INV_MAX = 10;
 const RR_TRANSFER_GAME_MIN = 10;
+const RR_TRANSFER_3NT_DIRECT_MIN = 11;
 const RR_TRANSFER_RAISE_LEN = 6;
 const RR_TRANSFER_NEW_SUIT_LEN = 5;
 const RR_MINOR_TRANSFER_CORRECT_LEN = 6;
@@ -194,6 +195,10 @@ function scoreRR_afterOneNTTransfer(bid, eval_, myBid, openerRebid) {
       Math.max(0, 5 - targetLen) * (LENGTH_SHORT_COST * 0.5));
     pen(p, `${hcp} HCP, need ${RR_TRANSFER_INV_MIN}-${RR_TRANSFER_INV_MAX}`,
       hcpDev(hcp, RR_TRANSFER_INV_MIN, RR_TRANSFER_INV_MAX) * HCP_COST);
+    const gameRaisePenalty = targetLen >= RR_TRANSFER_RAISE_LEN && hcp >= RR_TRANSFER_GAME_MIN ? 2 : 0;
+    if (gameRaisePenalty > 0) {
+      pen(p, `${targetLen}-card major fit and ${hcp} HCP: prefer direct game raise`, gameRaisePenalty);
+    }
     return scored(bid, deduct(penTotal(p)),
       `${hcp} HCP with ${targetLen} ${STRAIN_DISPLAY[target]}: invitational 3${tSym}`, p);
   }
@@ -240,8 +245,8 @@ function scoreRR_afterOneNTTransfer(bid, eval_, myBid, openerRebid) {
 
   if (strain === Strain.NOTRUMP && level === 3) {
     /** @type {PenaltyItem[]} */ const p = [];
-    pen(p, `${hcp} HCP, need ${RR_TRANSFER_GAME_MIN}+`,
-      Math.max(0, RR_TRANSFER_GAME_MIN - hcp) * HCP_COST);
+    pen(p, `${hcp} HCP, need ${RR_TRANSFER_3NT_DIRECT_MIN}+`,
+      Math.max(0, RR_TRANSFER_3NT_DIRECT_MIN - hcp) * HCP_COST);
     if (targetLen >= RR_TRANSFER_RAISE_LEN && shapeClass !== 'balanced') {
       pen(p, `${targetLen}-card fit: prefer major game`, MAJOR_FIT_GAME_COST);
     }

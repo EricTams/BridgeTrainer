@@ -343,7 +343,7 @@ let failures = 0;
   );
 }
 
-// Test 3: outside migrated convention windows, legacy bridge should return actionable recs.
+// Test 3: outside migrated convention windows, phase-baseline should return actionable recs.
 {
   let auction = createAuction('N');
   auction = addBid(auction, contractBid(1, Strain.SPADES));
@@ -353,9 +353,9 @@ let failures = 0;
   const recs = getConventionRuleRecommendations(STAYMAN_HAND, auction, seat) || [];
   const hasActionable = recs.some(r => r.bid.type === 'contract' || r.bid.type === 'pass');
   failures += report(
-    'legacy bridge provides universal fallback recommendations',
+    'phase baseline provides universal fallback recommendations',
     hasActionable && recs.length > 0,
-    `expected actionable legacy-bridge recommendations, got ${JSON.stringify(recs[0] || null)}`
+    `expected actionable phase-baseline recommendations, got ${JSON.stringify(recs[0] || null)}`
   );
 }
 

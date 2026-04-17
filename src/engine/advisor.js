@@ -6,7 +6,6 @@ import {
   applyForcingConstraints,
   scopeCandidatesByHardObligations,
 } from '../engine-v2/constraints/forcing.js';
-import { bidRecCompare, getLegacyRecommendations } from './legacy-advisor.js';
 
 /**
  * @typedef {import('./opening.js').BidRecommendation} BidRecommendation
@@ -29,12 +28,7 @@ export function getRecommendations(hand, auction, seat) {
   const v2Meaning = interpretAuctionState(auction, seat, eval_);
   const v2Recommendations = getConventionRuleRecommendations(hand, auction, seat) || [];
   const constrainedV2 = constrainRecommendations(v2Recommendations, auction, v2Meaning);
-  if (constrainedV2.length > 0) return constrainedV2.sort(bidRecCompare);
-
-  // Safety net: if v2 path returns no legal candidates, keep legacy behavior available.
-  const legacyRecommendations = getLegacyRecommendations(hand, auction, seat);
-  const constrainedLegacy = constrainRecommendations(legacyRecommendations, auction, v2Meaning);
-  return constrainedLegacy.sort(bidRecCompare);
+  return constrainedV2.sort(compareBidRecommendations);
 }
 
 /**
@@ -65,4 +59,17 @@ function constrainRecommendations(recommendations, auction, meaning) {
   const legal = recommendations.filter(rec => isLegalBid(auction, rec.bid));
   const scoped = scopeCandidatesByHardObligations(legal, meaning, auction);
   return applyForcingConstraints(scoped, meaning);
+}
+
+/**
+ * Compare recommendations by priority, preferring action over pass on ties.
+ * @param {BidRecommendation} a
+ * @param {BidRecommendation} b
+ * @returns {number}
+ */
+function compareBidRecommendations(a, b) {
+  if (b.priority !== a.priority) return b.priority - a.priority;
+  const aPass = a.bid.type === 'pass' ? 1 : 0;
+  const bPass = b.bid.type === 'pass' ? 1 : 0;
+  return aPass - bPass;
 }

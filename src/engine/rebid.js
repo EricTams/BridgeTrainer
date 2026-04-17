@@ -120,6 +120,8 @@ function score1NTRebid(bid, hand, eval_, partnerBid, interf) {
     return scoreAfterMinorTransferToClubs(bid, eval_);
   }
   if (level === 2 && strain === Strain.NOTRUMP) return scoreAfter2NTInvite(bid, eval_);
+  if (level === 3 && strain === Strain.HEARTS) return scoreAfterTransferInviteRaise(bid, eval_, Strain.HEARTS);
+  if (level === 3 && strain === Strain.SPADES) return scoreAfterTransferInviteRaise(bid, eval_, Strain.SPADES);
   if (level === 3 && strain === Strain.NOTRUMP) return scoreAfterGame(bid, 3);
   return scoreGenericRebid(bid, eval_);
 }
@@ -432,6 +434,50 @@ function scoreAfter2NTInvite(bid, eval_) {
   }
 
   return scoreGenericRebid(bid, eval_);
+}
+
+/**
+ * After responder invites in transferred major (1NT-2D/2H-2H/2S-3M),
+ * opener accepts to 4M with suitable fit/values or signs off.
+ * @param {Bid} bid
+ * @param {Evaluation} eval_
+ * @param {'H'|'S'} target
+ * @returns {BidRecommendation}
+ */
+function scoreAfterTransferInviteRaise(bid, eval_, target) {
+  const { hcp, shape } = eval_;
+  const support = suitLen(shape, target);
+  const sym = STRAIN_SYMBOLS[target];
+
+  if (bid.type === 'pass') {
+    /** @type {PenaltyItem[]} */ const p = [];
+    if (support >= 4 && hcp >= NT_ACCEPT_HCP - 1) {
+      pen(p, `${support} ${STRAIN_DISPLAY[target]} and ${hcp} HCP: should accept invite`, 6);
+    }
+    return scored(
+      bid,
+      deduct(penTotal(p)),
+      support >= 4 && hcp >= NT_ACCEPT_HCP - 1
+        ? `${hcp} HCP with ${support} ${STRAIN_DISPLAY[target]}: should accept to game`
+        : `${hcp} HCP: decline invitation`,
+      p,
+    );
+  }
+  if (bid.type !== 'contract') return scored(bid, 0, '');
+
+  if (bid.level === 4 && bid.strain === target) {
+    /** @type {PenaltyItem[]} */ const p = [];
+    if (support < 4) pen(p, `Only ${support} ${STRAIN_DISPLAY[target]}: thin acceptance`, 4);
+    if (hcp < NT_ACCEPT_HCP - 1) pen(p, `${hcp} HCP: below normal acceptance`, (NT_ACCEPT_HCP - 1 - hcp) * HCP_COST);
+    return scored(
+      bid,
+      deduct(penTotal(p)),
+      `${hcp} HCP with ${support} ${STRAIN_DISPLAY[target]}: accept invite to 4${sym}`,
+      p,
+    );
+  }
+
+  return scoreAfterGame(bid, 4);
 }
 
 // ── After 3NT (game already reached) ────────────────────────────────
