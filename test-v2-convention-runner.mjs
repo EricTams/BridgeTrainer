@@ -68,6 +68,38 @@ const WEAK_BALANCED_HAND = createHand([
   createCard(Suit.CLUBS, Rank.EIGHT),
 ]);
 
+const STRONG_TAKEOUT_SHAPE_HAND = createHand([
+  createCard(Suit.SPADES, Rank.ACE),
+  createCard(Suit.SPADES, Rank.KING),
+  createCard(Suit.SPADES, Rank.JACK),
+  createCard(Suit.SPADES, Rank.NINE),
+  createCard(Suit.HEARTS, Rank.ACE),
+  createCard(Suit.HEARTS, Rank.QUEEN),
+  createCard(Suit.HEARTS, Rank.TEN),
+  createCard(Suit.DIAMONDS, Rank.KING),
+  createCard(Suit.DIAMONDS, Rank.JACK),
+  createCard(Suit.DIAMONDS, Rank.FIVE),
+  createCard(Suit.CLUBS, Rank.THREE),
+  createCard(Suit.CLUBS, Rank.TWO),
+  createCard(Suit.CLUBS, Rank.FOUR),
+]);
+
+const NONCLASSIC_TAKEOUT_SHAPE_HAND = createHand([
+  createCard(Suit.SPADES, Rank.ACE),
+  createCard(Suit.SPADES, Rank.KING),
+  createCard(Suit.SPADES, Rank.NINE),
+  createCard(Suit.SPADES, Rank.EIGHT),
+  createCard(Suit.HEARTS, Rank.KING),
+  createCard(Suit.HEARTS, Rank.QUEEN),
+  createCard(Suit.HEARTS, Rank.JACK),
+  createCard(Suit.HEARTS, Rank.THREE),
+  createCard(Suit.DIAMONDS, Rank.SEVEN),
+  createCard(Suit.DIAMONDS, Rank.TWO),
+  createCard(Suit.CLUBS, Rank.EIGHT),
+  createCard(Suit.CLUBS, Rank.FIVE),
+  createCard(Suit.CLUBS, Rank.FOUR),
+]);
+
 /**
  * @param {string} name
  * @param {boolean} ok
@@ -90,10 +122,11 @@ let failures = 0;
   const count = conventionPackCount();
   const meta = conventionPackMeta();
   const hasCompetitivePack = meta.some(m => m.id === 'competitive-nt-penalty-double');
+  const hasSuitTakeoutPack = meta.some(m => m.id === 'competitive-suit-takeout-double');
   failures += report(
     'registry exposes multiple packs',
-    count >= 3 && hasCompetitivePack,
-    `expected >=3 packs and competitive pack present, got count=${count} meta=${JSON.stringify(meta)}`,
+    count >= 4 && hasCompetitivePack && hasSuitTakeoutPack,
+    `expected >=4 packs and competitive packs present, got count=${count} meta=${JSON.stringify(meta)}`,
   );
 }
 
@@ -163,6 +196,38 @@ let failures = 0;
     'competitive nt penalty-double pack is gated by values',
     recs === null,
     `expected null for weak hand in same window, got ${JSON.stringify(recs)}`,
+  );
+}
+
+// Test 6: direct competitive vs suit opening with takeout shape should prefer double.
+{
+  let auction = createAuction('S');
+  auction = addBid(auction, pass()); // S
+  auction = addBid(auction, contractBid(1, Strain.HEARTS)); // W
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // N to act
+  const recs = getConventionRuleRecommendations(STRONG_TAKEOUT_SHAPE_HAND, auction, seat) || [];
+  const top = recs[0] || null;
+  const topIsTakeoutDouble = !!top && top.bid.type === 'double';
+  failures += report(
+    'competitive suit takeout pack recommends double',
+    topIsTakeoutDouble,
+    `expected top recommendation double, got ${JSON.stringify(top)}`,
+  );
+}
+
+// Test 7: with non-classic shape below strong threshold, suit takeout pack should not trigger.
+{
+  let auction = createAuction('S');
+  auction = addBid(auction, pass()); // S
+  auction = addBid(auction, contractBid(1, Strain.HEARTS)); // W
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // N to act
+  const recs = getConventionRuleRecommendations(NONCLASSIC_TAKEOUT_SHAPE_HAND, auction, seat);
+  failures += report(
+    'competitive suit takeout pack is shape-gated',
+    recs === null,
+    `expected null for non-classic shape, got ${JSON.stringify(recs)}`,
   );
 }
 
