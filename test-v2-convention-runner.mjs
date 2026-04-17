@@ -132,6 +132,38 @@ const NO_NEGATIVE_DOUBLE_MAJOR_HAND = createHand([
   createCard(Suit.CLUBS, Rank.EIGHT),
 ]);
 
+const REOPENING_DOUBLE_HAND = createHand([
+  createCard(Suit.SPADES, Rank.ACE),
+  createCard(Suit.SPADES, Rank.KING),
+  createCard(Suit.SPADES, Rank.JACK),
+  createCard(Suit.SPADES, Rank.FOUR),
+  createCard(Suit.HEARTS, Rank.ACE),
+  createCard(Suit.HEARTS, Rank.QUEEN),
+  createCard(Suit.HEARTS, Rank.TEN),
+  createCard(Suit.DIAMONDS, Rank.KING),
+  createCard(Suit.DIAMONDS, Rank.JACK),
+  createCard(Suit.DIAMONDS, Rank.FIVE),
+  createCard(Suit.CLUBS, Rank.THREE),
+  createCard(Suit.CLUBS, Rank.TWO),
+  createCard(Suit.CLUBS, Rank.FOUR),
+]);
+
+const NO_REOPENING_SHAPE_HAND = createHand([
+  createCard(Suit.SPADES, Rank.KING),
+  createCard(Suit.SPADES, Rank.QUEEN),
+  createCard(Suit.SPADES, Rank.TEN),
+  createCard(Suit.SPADES, Rank.THREE),
+  createCard(Suit.HEARTS, Rank.ACE),
+  createCard(Suit.HEARTS, Rank.JACK),
+  createCard(Suit.HEARTS, Rank.NINE),
+  createCard(Suit.HEARTS, Rank.FIVE),
+  createCard(Suit.DIAMONDS, Rank.KING),
+  createCard(Suit.DIAMONDS, Rank.JACK),
+  createCard(Suit.DIAMONDS, Rank.SEVEN),
+  createCard(Suit.CLUBS, Rank.EIGHT),
+  createCard(Suit.CLUBS, Rank.FOUR),
+]);
+
 /**
  * @param {string} name
  * @param {boolean} ok
@@ -156,10 +188,15 @@ let failures = 0;
   const hasCompetitivePack = meta.some(m => m.id === 'competitive-nt-penalty-double');
   const hasSuitTakeoutPack = meta.some(m => m.id === 'competitive-suit-takeout-double');
   const hasNegativeDoublePack = meta.some(m => m.id === 'negative-double');
+  const hasReopeningDoublePack = meta.some(m => m.id === 'reopening-double');
   failures += report(
     'registry exposes multiple packs',
-    count >= 5 && hasCompetitivePack && hasSuitTakeoutPack && hasNegativeDoublePack,
-    `expected >=5 packs and competitive packs present, got count=${count} meta=${JSON.stringify(meta)}`,
+    count >= 6 &&
+      hasCompetitivePack &&
+      hasSuitTakeoutPack &&
+      hasNegativeDoublePack &&
+      hasReopeningDoublePack,
+    `expected >=6 packs and all competitive packs present, got count=${count} meta=${JSON.stringify(meta)}`,
   );
 }
 
@@ -293,6 +330,42 @@ let failures = 0;
     'negative-double pack is major-length gated',
     recs === null,
     `expected null when no 4-card unbid major, got ${JSON.stringify(recs)}`,
+  );
+}
+
+// Test 10: balancing reopening seat with takeout shape should prefer reopening double.
+{
+  let auction = createAuction('S');
+  auction = addBid(auction, pass()); // S
+  auction = addBid(auction, contractBid(1, Strain.HEARTS)); // W
+  auction = addBid(auction, pass()); // N
+  auction = addBid(auction, pass()); // E
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // S to act in balancing seat
+  const recs = getConventionRuleRecommendations(REOPENING_DOUBLE_HAND, auction, seat) || [];
+  const top = recs[0] || null;
+  const topIsReopeningDouble = !!top && top.bid.type === 'double';
+  failures += report(
+    'reopening-double pack recommends double',
+    topIsReopeningDouble,
+    `expected top reopening recommendation double, got ${JSON.stringify(top)}`
+  );
+}
+
+// Test 11: balancing seat without classic shape below strong threshold should not trigger reopening pack.
+{
+  let auction = createAuction('S');
+  auction = addBid(auction, pass()); // S
+  auction = addBid(auction, contractBid(1, Strain.HEARTS)); // W
+  auction = addBid(auction, pass()); // N
+  auction = addBid(auction, pass()); // E
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // S to act in balancing seat
+  const recs = getConventionRuleRecommendations(NO_REOPENING_SHAPE_HAND, auction, seat);
+  failures += report(
+    'reopening-double pack is shape-gated',
+    recs === null,
+    `expected null for non-classic reopening shape, got ${JSON.stringify(recs)}`
   );
 }
 
