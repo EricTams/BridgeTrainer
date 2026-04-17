@@ -4,7 +4,7 @@ import { getRecommendations } from '../engine/advisor.js';
  * @typedef {import('../model/bid.js').Bid} Bid
  * @typedef {import('../model/bid.js').Auction} Auction
  * @typedef {import('../model/hand.js').Hand} Hand
- * @typedef {import('../engine/opening.js').BidRecommendation} BidRecommendation
+ * @typedef {import('../engine/advisor.js').BidRecommendation} BidRecommendation
  * @typedef {{
  *   points: number,
  *   recommendations: BidRecommendation[],

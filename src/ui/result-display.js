@@ -2,7 +2,7 @@ import { bidToString } from '../model/bid.js';
 
 /**
  * @typedef {import('../model/bid.js').Bid} Bid
- * @typedef {import('../engine/opening.js').BidRecommendation} BidRecommendation
+ * @typedef {import('../engine/advisor.js').BidRecommendation} BidRecommendation
  */
 
 const MAX_RECS_SHOWN = 5;
