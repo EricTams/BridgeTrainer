@@ -3,6 +3,7 @@ import { ntStaymanTransferPack } from './nt-stayman-transfers.js';
 import { competitiveNTPenaltyDoublePack } from './competitive-nt-penalty-double.js';
 import { reopeningDoublePack } from './reopening-double.js';
 import { competitiveSuitTakeoutDoublePack } from './competitive-suit-takeout-double.js';
+import { advancerAfterDoublePack } from './advancer-after-double.js';
 import { negativeDoublePack } from './negative-double.js';
 import { fallbackNoopPack } from './fallback-noop.js';
 
@@ -28,6 +29,7 @@ const CONVENTION_PACKS = Object.freeze([
   competitiveNTPenaltyDoublePack,
   reopeningDoublePack,
   competitiveSuitTakeoutDoublePack,
+  advancerAfterDoublePack,
   negativeDoublePack,
   fallbackNoopPack,
 ]);

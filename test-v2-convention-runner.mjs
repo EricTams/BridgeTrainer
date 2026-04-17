@@ -5,6 +5,7 @@ import {
   contractBid,
   createAuction,
   currentSeat,
+  dbl,
   pass,
   Strain,
 } from './src/model/bid.js';
@@ -164,6 +165,22 @@ const NO_REOPENING_SHAPE_HAND = createHand([
   createCard(Suit.CLUBS, Rank.FOUR),
 ]);
 
+const ADVANCER_AFTER_DOUBLE_HAND = createHand([
+  createCard(Suit.SPADES, Rank.KING),
+  createCard(Suit.SPADES, Rank.JACK),
+  createCard(Suit.SPADES, Rank.TEN),
+  createCard(Suit.SPADES, Rank.EIGHT),
+  createCard(Suit.HEARTS, Rank.KING),
+  createCard(Suit.HEARTS, Rank.TEN),
+  createCard(Suit.HEARTS, Rank.NINE),
+  createCard(Suit.DIAMONDS, Rank.ACE),
+  createCard(Suit.DIAMONDS, Rank.QUEEN),
+  createCard(Suit.DIAMONDS, Rank.JACK),
+  createCard(Suit.CLUBS, Rank.TEN),
+  createCard(Suit.CLUBS, Rank.FOUR),
+  createCard(Suit.CLUBS, Rank.THREE),
+]);
+
 /**
  * @param {string} name
  * @param {boolean} ok
@@ -189,14 +206,16 @@ let failures = 0;
   const hasSuitTakeoutPack = meta.some(m => m.id === 'competitive-suit-takeout-double');
   const hasNegativeDoublePack = meta.some(m => m.id === 'negative-double');
   const hasReopeningDoublePack = meta.some(m => m.id === 'reopening-double');
+  const hasAdvancerAfterDoublePack = meta.some(m => m.id === 'advancer-after-double');
   failures += report(
     'registry exposes multiple packs',
-    count >= 6 &&
+    count >= 7 &&
       hasCompetitivePack &&
       hasSuitTakeoutPack &&
       hasNegativeDoublePack &&
-      hasReopeningDoublePack,
-    `expected >=6 packs and all competitive packs present, got count=${count} meta=${JSON.stringify(meta)}`,
+      hasReopeningDoublePack &&
+      hasAdvancerAfterDoublePack,
+    `expected >=7 packs and all competitive packs present, got count=${count} meta=${JSON.stringify(meta)}`,
   );
 }
 
@@ -366,6 +385,41 @@ let failures = 0;
     'reopening-double pack is shape-gated',
     recs === null,
     `expected null for non-classic reopening shape, got ${JSON.stringify(recs)}`
+  );
+}
+
+// Test 12: after partner's active double, advancer pack should trigger and return actionable calls.
+{
+  let auction = createAuction('N');
+  auction = addBid(auction, pass()); // N
+  auction = addBid(auction, contractBid(1, Strain.HEARTS)); // E
+  auction = addBid(auction, dbl()); // S (partner of N doubles)
+  auction = addBid(auction, pass()); // W
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // N to act
+  const recs = getConventionRuleRecommendations(ADVANCER_AFTER_DOUBLE_HAND, auction, seat) || [];
+  const top = recs[0] || null;
+  const topIsActionable = !!top && (top.bid.type === 'contract' || top.bid.type === 'double' || top.bid.type === 'pass');
+  failures += report(
+    'advancer-after-double pack triggers on active partner double',
+    topIsActionable && recs.length >= 1,
+    `expected non-empty recommendations in advancer window, got ${JSON.stringify(recs)}`
+  );
+}
+
+// Test 13: without partner double, advancer-after-double pack should not trigger.
+{
+  let auction = createAuction('N');
+  auction = addBid(auction, pass()); // N
+  auction = addBid(auction, contractBid(1, Strain.HEARTS)); // E
+  auction = addBid(auction, pass()); // S
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // W to act; no partner double context
+  const recs = getConventionRuleRecommendations(ADVANCER_AFTER_DOUBLE_HAND, auction, seat);
+  failures += report(
+    'advancer-after-double pack is context-gated',
+    recs === null,
+    `expected null without partner double context, got ${JSON.stringify(recs)}`
   );
 }
 
