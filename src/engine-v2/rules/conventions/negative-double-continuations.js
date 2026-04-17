@@ -13,6 +13,10 @@ const NEG_DBL_CONTINUE_GAME_HCP = 11;
 const NEG_DBL_CONTINUE_STRONG_HCP = 13;
 const NEG_DBL_SHOW_MAJOR_LEN = 4;
 const NEG_DBL_SUPPORT_LEN = 3;
+const NEG_DBL_CUE_STRONG_HCP = 17;
+const NEG_DBL_ALT_SUIT_LEN = 4;
+const NEG_DBL_OPENING_JUMP_LEN = 6;
+const NEG_DBL_OPENING_JUMP_HCP = 17;
 
 /**
  * @param {ConventionContext} ctx
@@ -60,6 +64,18 @@ function scoreResponderAfterNegativeDouble(ctx, window, legal) {
 
   if (partnerMajor) {
     const support = suitLen(shape, partnerMajor);
+    if (support >= NEG_DBL_SHOW_MAJOR_LEN && hcp >= NEG_DBL_CONTINUE_STRONG_HCP) {
+      const gameBid = legalContractExact(legal, 4, partnerMajor);
+      if (gameBid) {
+        results.push(
+          rec(
+            gameBid,
+            11,
+            `${hcp} HCP, ${support} support: bid game in partner major`,
+          ),
+        );
+      }
+    }
     if (support >= NEG_DBL_SUPPORT_LEN) {
       const raiseLevel = nextLevelForStrain(window.lastContract, partnerMajor);
       const raiseBid = legalContractAtOrAbove(legal, raiseLevel, partnerMajor);
@@ -159,12 +175,27 @@ function scoreResponderAfterNegativeDouble(ctx, window, legal) {
  */
 function scoreOpenerAfterNegativeDouble(ctx, window, legal) {
   const shape = ctx.eval_.shape;
+  const shapeClass = ctx.eval_.shapeClass;
   const hcp = ctx.eval_.hcp;
   const results = [];
+  const openerStrain = window.partnerStrain;
 
   const unbidMajor = bestUnbidMajor(shape, window.unbidMajors);
   if (!unbidMajor) return null;
   const support = suitLen(shape, unbidMajor);
+  const cueLevel = nextLevelForStrain(window.lastContract, window.oppStrain);
+  const cueBid = legalContractAtOrAbove(legal, cueLevel, window.oppStrain);
+
+  if (support >= NEG_DBL_SHOW_MAJOR_LEN && hcp >= NEG_DBL_CUE_STRONG_HCP && cueBid) {
+    results.push(
+      rec(
+        cueBid,
+        10,
+        `${hcp} HCP, ${support} support: cue-bid to show extras`,
+      ),
+    );
+  }
+
   if (support >= NEG_DBL_SUPPORT_LEN) {
     const level = nextLevelForStrain(window.lastContract, unbidMajor);
     const bid = legalContractAtOrAbove(legal, level, unbidMajor);
@@ -180,6 +211,40 @@ function scoreOpenerAfterNegativeDouble(ctx, window, legal) {
     }
   }
 
+  const openingJumpLevel = Math.max(
+    3,
+    nextLevelForStrain(window.lastContract, openerStrain),
+  );
+  const openingJump = legalContractAtOrAbove(legal, openingJumpLevel, openerStrain);
+  const openingLen = suitLen(shape, openerStrain);
+  if (openingJump && openingLen >= NEG_DBL_OPENING_JUMP_LEN && hcp >= NEG_DBL_OPENING_JUMP_HCP) {
+    results.push(
+      rec(
+        openingJump,
+        10,
+        `${hcp} HCP, ${openingLen} ${strainName(openerStrain)}: jump rebid own suit`,
+      ),
+    );
+  }
+
+  const altSuit = bestAlternativeSuit(shape, openerStrain, window);
+  if (altSuit && support < NEG_DBL_SUPPORT_LEN) {
+    const altBid = legalContractAtOrAbove(
+      legal,
+      nextLevelForStrain(window.lastContract, altSuit),
+      altSuit,
+    );
+    if (altBid) {
+      results.push(
+        rec(
+          altBid,
+          10,
+          `${hcp} HCP, ${suitLen(shape, altSuit)} ${strainName(altSuit)}: natural alternative to rebid`,
+        ),
+      );
+    }
+  }
+
   const cheapestPartner = legalContractAtOrAbove(
     legal,
     nextLevelForStrain(window.lastContract, window.partnerStrain),
@@ -189,19 +254,26 @@ function scoreOpenerAfterNegativeDouble(ctx, window, legal) {
     results.push(
       rec(
         cheapestPartner,
-        9,
+        8,
         `${hcp} HCP: compete in partner suit`,
       ),
     );
   }
 
+  const minNtLevel = nextLevelForStrain(window.lastContract, Strain.NOTRUMP);
+  const targetNt = Math.max(minNtLevel, targetNtLevelForOpener(hcp));
   const nt = legalContractAtOrAbove(
     legal,
-    nextLevelForStrain(window.lastContract, Strain.NOTRUMP),
+    targetNt,
     Strain.NOTRUMP,
   );
-  if (nt && hcp >= NEG_DBL_CONTINUE_INVITE_HCP && hasStopperPosture(shape, window.oppStrain)) {
-    const ntPriority = support >= NEG_DBL_SUPPORT_LEN ? 7 : 8;
+  if (
+    nt &&
+    hcp >= NEG_DBL_CONTINUE_INVITE_HCP &&
+    isBalancedish(shapeClass) &&
+    hasStopperPosture(shape, window.oppStrain)
+  ) {
+    const ntPriority = support >= NEG_DBL_SHOW_MAJOR_LEN ? 7 : 10;
     results.push(rec(nt, ntPriority, `${hcp} HCP with stopper posture: notrump continuation`));
   }
 
@@ -508,6 +580,16 @@ function targetNtLevelForResponder(hcp) {
 }
 
 /**
+ * @param {number} hcp
+ * @returns {1|2|3}
+ */
+function targetNtLevelForOpener(hcp) {
+  if (hcp >= 19) return 3;
+  if (hcp >= 15) return 2;
+  return 1;
+}
+
+/**
  * @param {ContractBid[]} legal
  * @param {number} level
  * @param {'C'|'D'|'H'|'S'|'NT'} strain
@@ -530,6 +612,30 @@ function bestUnbidMajor(shape, majors) {
   let best = majors[0];
   for (const major of majors.slice(1)) {
     if (suitLen(shape, major) > suitLen(shape, best)) best = major;
+  }
+  return best;
+}
+
+/**
+ * @param {number[]} shape
+ * @param {'C'|'D'|'H'|'S'} openerStrain
+ * @param {NegativeDoubleContinuationWindow} window
+ * @returns {'C'|'D'|'H'|'S'|null}
+ */
+function bestAlternativeSuit(shape, openerStrain, window) {
+  /** @type {Array<'C'|'D'|'H'|'S'>} */
+  const suits = [Strain.CLUBS, Strain.DIAMONDS, Strain.HEARTS, Strain.SPADES];
+  /** @type {'C'|'D'|'H'|'S'|null} */
+  let best = null;
+  let bestLen = 0;
+  for (const suit of suits) {
+    if (suit === openerStrain || suit === window.oppStrain) continue;
+    const len = suitLen(shape, suit);
+    if (len < NEG_DBL_ALT_SUIT_LEN) continue;
+    if (!best || len > bestLen) {
+      best = suit;
+      bestLen = len;
+    }
   }
   return best;
 }
