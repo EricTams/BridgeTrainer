@@ -2,6 +2,7 @@ import { buildConventionPackContext } from './context.js';
 import { ntStaymanTransferPack } from './nt-stayman-transfers.js';
 import { competitiveNTPenaltyDoublePack } from './competitive-nt-penalty-double.js';
 import { competitiveSuitTakeoutDoublePack } from './competitive-suit-takeout-double.js';
+import { negativeDoublePack } from './negative-double.js';
 import { fallbackNoopPack } from './fallback-noop.js';
 
 /**
@@ -25,6 +26,7 @@ const CONVENTION_PACKS = Object.freeze([
   ntStaymanTransferPack,
   competitiveNTPenaltyDoublePack,
   competitiveSuitTakeoutDoublePack,
+  negativeDoublePack,
   fallbackNoopPack,
 ]);
 

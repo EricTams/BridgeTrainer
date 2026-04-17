@@ -100,6 +100,38 @@ const NONCLASSIC_TAKEOUT_SHAPE_HAND = createHand([
   createCard(Suit.CLUBS, Rank.FOUR),
 ]);
 
+const NEGATIVE_DOUBLE_HAND = createHand([
+  createCard(Suit.SPADES, Rank.ACE),
+  createCard(Suit.SPADES, Rank.KING),
+  createCard(Suit.SPADES, Rank.NINE),
+  createCard(Suit.SPADES, Rank.FOUR),
+  createCard(Suit.HEARTS, Rank.TEN),
+  createCard(Suit.HEARTS, Rank.SEVEN),
+  createCard(Suit.HEARTS, Rank.FIVE),
+  createCard(Suit.DIAMONDS, Rank.ACE),
+  createCard(Suit.DIAMONDS, Rank.QUEEN),
+  createCard(Suit.DIAMONDS, Rank.THREE),
+  createCard(Suit.CLUBS, Rank.KING),
+  createCard(Suit.CLUBS, Rank.JACK),
+  createCard(Suit.CLUBS, Rank.EIGHT),
+]);
+
+const NO_NEGATIVE_DOUBLE_MAJOR_HAND = createHand([
+  createCard(Suit.SPADES, Rank.ACE),
+  createCard(Suit.SPADES, Rank.TWO),
+  createCard(Suit.HEARTS, Rank.KING),
+  createCard(Suit.HEARTS, Rank.JACK),
+  createCard(Suit.HEARTS, Rank.NINE),
+  createCard(Suit.DIAMONDS, Rank.ACE),
+  createCard(Suit.DIAMONDS, Rank.KING),
+  createCard(Suit.DIAMONDS, Rank.TEN),
+  createCard(Suit.DIAMONDS, Rank.SIX),
+  createCard(Suit.CLUBS, Rank.QUEEN),
+  createCard(Suit.CLUBS, Rank.JACK),
+  createCard(Suit.CLUBS, Rank.NINE),
+  createCard(Suit.CLUBS, Rank.EIGHT),
+]);
+
 /**
  * @param {string} name
  * @param {boolean} ok
@@ -123,10 +155,11 @@ let failures = 0;
   const meta = conventionPackMeta();
   const hasCompetitivePack = meta.some(m => m.id === 'competitive-nt-penalty-double');
   const hasSuitTakeoutPack = meta.some(m => m.id === 'competitive-suit-takeout-double');
+  const hasNegativeDoublePack = meta.some(m => m.id === 'negative-double');
   failures += report(
     'registry exposes multiple packs',
-    count >= 4 && hasCompetitivePack && hasSuitTakeoutPack,
-    `expected >=4 packs and competitive packs present, got count=${count} meta=${JSON.stringify(meta)}`,
+    count >= 5 && hasCompetitivePack && hasSuitTakeoutPack && hasNegativeDoublePack,
+    `expected >=5 packs and competitive packs present, got count=${count} meta=${JSON.stringify(meta)}`,
   );
 }
 
@@ -228,6 +261,38 @@ let failures = 0;
     'competitive suit takeout pack is shape-gated',
     recs === null,
     `expected null for non-classic shape, got ${JSON.stringify(recs)}`,
+  );
+}
+
+// Test 8: responding after partner opens and opponent overcalls, unbid major + values should prefer negative double.
+{
+  let auction = createAuction('N');
+  auction = addBid(auction, contractBid(1, Strain.CLUBS)); // N (partner opens for E/W seat)
+  auction = addBid(auction, contractBid(1, Strain.DIAMONDS)); // E overcall
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // S to act
+  const recs = getConventionRuleRecommendations(NEGATIVE_DOUBLE_HAND, auction, seat) || [];
+  const top = recs[0] || null;
+  const topIsNegativeDouble = !!top && top.bid.type === 'double';
+  failures += report(
+    'negative-double pack recommends double',
+    topIsNegativeDouble,
+    `expected top recommendation double, got ${JSON.stringify(top)}`,
+  );
+}
+
+// Test 9: same responding window without 4-card unbid major should not trigger negative-double pack.
+{
+  let auction = createAuction('N');
+  auction = addBid(auction, contractBid(1, Strain.CLUBS)); // N
+  auction = addBid(auction, contractBid(1, Strain.DIAMONDS)); // E
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // S to act
+  const recs = getConventionRuleRecommendations(NO_NEGATIVE_DOUBLE_MAJOR_HAND, auction, seat);
+  failures += report(
+    'negative-double pack is major-length gated',
+    recs === null,
+    `expected null when no 4-card unbid major, got ${JSON.stringify(recs)}`,
   );
 }
 
