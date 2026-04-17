@@ -181,6 +181,70 @@ const ADVANCER_AFTER_DOUBLE_HAND = createHand([
   createCard(Suit.CLUBS, Rank.THREE),
 ]);
 
+const MICHAELS_HAND = createHand([
+  createCard(Suit.SPADES, Rank.ACE),
+  createCard(Suit.SPADES, Rank.KING),
+  createCard(Suit.SPADES, Rank.TEN),
+  createCard(Suit.SPADES, Rank.SEVEN),
+  createCard(Suit.SPADES, Rank.FOUR),
+  createCard(Suit.HEARTS, Rank.ACE),
+  createCard(Suit.HEARTS, Rank.QUEEN),
+  createCard(Suit.HEARTS, Rank.NINE),
+  createCard(Suit.HEARTS, Rank.SEVEN),
+  createCard(Suit.HEARTS, Rank.FIVE),
+  createCard(Suit.DIAMONDS, Rank.JACK),
+  createCard(Suit.DIAMONDS, Rank.FIVE),
+  createCard(Suit.CLUBS, Rank.TWO),
+]);
+
+const WEAK_MICHAELS_HAND = createHand([
+  createCard(Suit.SPADES, Rank.QUEEN),
+  createCard(Suit.SPADES, Rank.JACK),
+  createCard(Suit.SPADES, Rank.TEN),
+  createCard(Suit.SPADES, Rank.NINE),
+  createCard(Suit.SPADES, Rank.FIVE),
+  createCard(Suit.HEARTS, Rank.TEN),
+  createCard(Suit.HEARTS, Rank.EIGHT),
+  createCard(Suit.HEARTS, Rank.SEVEN),
+  createCard(Suit.HEARTS, Rank.SIX),
+  createCard(Suit.HEARTS, Rank.FIVE),
+  createCard(Suit.DIAMONDS, Rank.KING),
+  createCard(Suit.DIAMONDS, Rank.JACK),
+  createCard(Suit.CLUBS, Rank.THREE),
+]);
+
+const UNUSUAL_NT_HAND = createHand([
+  createCard(Suit.SPADES, Rank.KING),
+  createCard(Suit.SPADES, Rank.FOUR),
+  createCard(Suit.HEARTS, Rank.NINE),
+  createCard(Suit.DIAMONDS, Rank.ACE),
+  createCard(Suit.DIAMONDS, Rank.QUEEN),
+  createCard(Suit.DIAMONDS, Rank.JACK),
+  createCard(Suit.DIAMONDS, Rank.EIGHT),
+  createCard(Suit.DIAMONDS, Rank.FIVE),
+  createCard(Suit.CLUBS, Rank.ACE),
+  createCard(Suit.CLUBS, Rank.KING),
+  createCard(Suit.CLUBS, Rank.JACK),
+  createCard(Suit.CLUBS, Rank.SEVEN),
+  createCard(Suit.CLUBS, Rank.THREE),
+]);
+
+const NO_UNUSUAL_SHAPE_HAND = createHand([
+  createCard(Suit.SPADES, Rank.KING),
+  createCard(Suit.SPADES, Rank.JACK),
+  createCard(Suit.SPADES, Rank.TEN),
+  createCard(Suit.SPADES, Rank.SIX),
+  createCard(Suit.HEARTS, Rank.QUEEN),
+  createCard(Suit.HEARTS, Rank.EIGHT),
+  createCard(Suit.HEARTS, Rank.FOUR),
+  createCard(Suit.DIAMONDS, Rank.JACK),
+  createCard(Suit.DIAMONDS, Rank.NINE),
+  createCard(Suit.DIAMONDS, Rank.TEN),
+  createCard(Suit.CLUBS, Rank.EIGHT),
+  createCard(Suit.CLUBS, Rank.SIX),
+  createCard(Suit.CLUBS, Rank.FOUR),
+]);
+
 /**
  * @param {string} name
  * @param {boolean} ok
@@ -208,16 +272,20 @@ let failures = 0;
   const hasReopeningDoublePack = meta.some(m => m.id === 'reopening-double');
   const hasAdvancerAfterTakeoutPack = meta.some(m => m.id === 'advancer-after-takeout-double');
   const hasAdvancerAfterPenaltyPack = meta.some(m => m.id === 'advancer-after-penalty-double');
+  const hasMichaelsPack = meta.some(m => m.id === 'michaels');
+  const hasUnusualNotrumpPack = meta.some(m => m.id === 'unusual-notrump');
   failures += report(
     'registry exposes multiple packs',
-    count >= 8 &&
+    count >= 10 &&
       hasCompetitivePack &&
       hasSuitTakeoutPack &&
       hasNegativeDoublePack &&
       hasReopeningDoublePack &&
       hasAdvancerAfterTakeoutPack &&
-      hasAdvancerAfterPenaltyPack,
-    `expected >=8 packs and all competitive packs present, got count=${count} meta=${JSON.stringify(meta)}`,
+      hasAdvancerAfterPenaltyPack &&
+      hasMichaelsPack &&
+      hasUnusualNotrumpPack,
+    `expected >=10 packs and all competitive packs present, got count=${count} meta=${JSON.stringify(meta)}`,
   );
 }
 
@@ -294,7 +362,7 @@ let failures = 0;
 {
   let auction = createAuction('S');
   auction = addBid(auction, pass()); // S
-  auction = addBid(auction, contractBid(1, Strain.HEARTS)); // W
+  auction = addBid(auction, contractBid(1, Strain.SPADES)); // W
   /** @type {Seat} */
   const seat = currentSeat(auction); // N to act
   const recs = getConventionRuleRecommendations(STRONG_TAKEOUT_SHAPE_HAND, auction, seat) || [];
@@ -311,7 +379,7 @@ let failures = 0;
 {
   let auction = createAuction('S');
   auction = addBid(auction, pass()); // S
-  auction = addBid(auction, contractBid(1, Strain.HEARTS)); // W
+  auction = addBid(auction, contractBid(1, Strain.SPADES)); // W
   /** @type {Seat} */
   const seat = currentSeat(auction); // N to act
   const recs = getConventionRuleRecommendations(NONCLASSIC_TAKEOUT_SHAPE_HAND, auction, seat);
@@ -460,6 +528,83 @@ let failures = 0;
     'advancer-after-penalty pack is NT-context gated',
     topIsNotForcedPass,
     `expected non-NT-double flow (not forced pass conversion), got ${JSON.stringify(recs)}`
+  );
+}
+
+// Test 16: Michaels cue-bid window should recommend cue-bid.
+{
+  let auction = createAuction('S');
+  auction = addBid(auction, pass()); // S
+  auction = addBid(auction, contractBid(1, Strain.CLUBS)); // W
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // N to act
+  const recs = getConventionRuleRecommendations(MICHAELS_HAND, auction, seat) || [];
+  const top = recs[0] || null;
+  const topIsMichaelsCue = !!top &&
+    top.bid.type === 'contract' &&
+    top.bid.level === 2 &&
+    top.bid.strain === Strain.CLUBS;
+  failures += report(
+    'michaels pack recommends cue-bid',
+    topIsMichaelsCue,
+    `expected Michaels cue-bid top recommendation, got ${JSON.stringify(top)}`
+  );
+}
+
+// Test 17: weak two-suiter should not trigger Michaels pack.
+{
+  let auction = createAuction('S');
+  auction = addBid(auction, pass()); // S
+  auction = addBid(auction, contractBid(1, Strain.CLUBS)); // W
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // N to act
+  const recs = getConventionRuleRecommendations(WEAK_MICHAELS_HAND, auction, seat);
+  failures += report(
+    'michaels pack is HCP-gated',
+    recs === null,
+    `expected null for weak Michaels shape, got ${JSON.stringify(recs)}`
+  );
+}
+
+// Test 18: Unusual 2NT window should activate and include 2NT recommendation.
+{
+  let auction = createAuction('E');
+  auction = addBid(auction, contractBid(1, Strain.HEARTS)); // E
+  auction = addBid(auction, pass()); // S
+  auction = addBid(auction, pass()); // W
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // N to act (not reopening seat)
+  const recs = getConventionRuleRecommendations(UNUSUAL_NT_HAND, auction, seat) || [];
+  const hasUnusual2NT = recs.some(rec =>
+    rec.bid.type === 'contract' &&
+    rec.bid.level === 2 &&
+    rec.bid.strain === Strain.NOTRUMP
+  );
+  failures += report(
+    'unusual-notrump pack includes 2NT',
+    hasUnusual2NT,
+    `expected unusual 2NT recommendation, got ${JSON.stringify(recs)}`
+  );
+}
+
+// Test 19: missing two-lower-suits shape should not trigger unusual notrump pack.
+{
+  let auction = createAuction('E');
+  auction = addBid(auction, contractBid(1, Strain.HEARTS)); // E
+  auction = addBid(auction, pass()); // S
+  auction = addBid(auction, pass()); // W
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // N to act
+  const recs = getConventionRuleRecommendations(NO_UNUSUAL_SHAPE_HAND, auction, seat) || [];
+  const hasUnusual2NT = recs.some(rec =>
+    rec.bid.type === 'contract' &&
+    rec.bid.level === 2 &&
+    rec.bid.strain === Strain.NOTRUMP
+  );
+  failures += report(
+    'unusual-notrump pack is shape-gated',
+    !hasUnusual2NT,
+    `expected no unusual 2NT recommendation without shape, got ${JSON.stringify(recs)}`
   );
 }
 
