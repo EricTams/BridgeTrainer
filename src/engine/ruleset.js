@@ -1,4 +1,4 @@
-import { contractBid, dbl, pass, redbl, Strain, STRAIN_ORDER } from '../model/bid.js';
+import { contractBid, dbl, lastContractBid, pass, redbl, Strain, STRAIN_ORDER } from '../model/bid.js';
 import { Rank } from '../model/card.js';
 import { INHERITED_COMPAT_CASES } from './inherited-compat-cases.js';
 
@@ -203,6 +203,107 @@ function bestOvercallSuit(context) {
     }
   }
   return best;
+}
+
+/**
+ * @param {RuleContext} context
+ * @param {Strain | null} [exclude]
+ * @param {number} [minLength]
+ * @returns {Strain[]}
+ */
+function suitsByLength(context, exclude = null, minLength = 0) {
+  return [...SUIT_STRAINS]
+    .filter(strain => strain !== exclude && suitLength(context, strain) >= minLength)
+    .sort((a, b) => {
+      const delta = suitLength(context, b) - suitLength(context, a);
+      if (delta !== 0) return delta;
+      return suitOrderIndex(a) - suitOrderIndex(b);
+    });
+}
+
+/**
+ * @param {RuleContext} context
+ * @param {Strain} strain
+ * @param {number} [minimumLevel]
+ * @returns {Bid | null}
+ */
+function lowestLegalContractForStrain(context, strain, minimumLevel = 1) {
+  const last = lastContractBid(context.auction);
+  const start = Math.max(1, minimumLevel);
+  for (let level = start; level <= 7; level++) {
+    if (!last) return contractBid(level, strain);
+    if (level > last.level) return contractBid(level, strain);
+    if (level === last.level && suitOrderIndex(strain) > suitOrderIndex(last.strain)) {
+      return contractBid(level, strain);
+    }
+  }
+  return null;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {Bid}
+ */
+function respondingConstructiveFallback(context) {
+  const partner = context.partnerBid;
+  if (partner && partner.strain !== Strain.NOTRUMP && suitLength(context, partner.strain) >= 3) {
+    const raise = lowestLegalContractForStrain(context, partner.strain, partner.level + 1);
+    if (raise) return raise;
+  }
+  if (context.evaluation.hcp >= 6) {
+    for (const suit of suitsByLength(context, partner ? partner.strain : null, 4)) {
+      const bid = lowestLegalContractForStrain(context, suit);
+      if (bid) return bid;
+    }
+    if (isSemiOrBalanced(context)) {
+      const nt = lowestLegalContractForStrain(context, Strain.NOTRUMP);
+      if (nt) return nt;
+    }
+  }
+  return pass();
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {Bid}
+ */
+function rebidConstructiveFallback(context) {
+  if (context.ownLastBid && suitLength(context, context.ownLastBid.strain) >= 5) {
+    const rebid = lowestLegalContractForStrain(context, context.ownLastBid.strain, context.ownLastBid.level + 1);
+    if (rebid) return rebid;
+  }
+  if (context.partnerLastBid && context.partnerLastBid.strain !== Strain.NOTRUMP &&
+      suitLength(context, context.partnerLastBid.strain) >= 3) {
+    const raise = lowestLegalContractForStrain(context, context.partnerLastBid.strain, context.partnerLastBid.level + 1);
+    if (raise) return raise;
+  }
+  if (context.evaluation.hcp >= 11 && isSemiOrBalanced(context)) {
+    const nt = lowestLegalContractForStrain(context, Strain.NOTRUMP);
+    if (nt) return nt;
+  }
+  const ownStrain = context.ownLastBid ? context.ownLastBid.strain : null;
+  for (const suit of suitsByLength(context, ownStrain, 4)) {
+    const bid = lowestLegalContractForStrain(context, suit);
+    if (bid) return bid;
+  }
+  return pass();
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {Bid}
+ */
+function competitiveConstructiveFallback(context) {
+  for (const suit of suitsByLength(context, null, 5)) {
+    const bid = lowestLegalContractForStrain(context, suit);
+    if (bid) return bid;
+  }
+  if (context.evaluation.hcp >= 11 && isSemiOrBalanced(context)) {
+    const nt = lowestLegalContractForStrain(context, Strain.NOTRUMP);
+    if (nt) return nt;
+  }
+  if (context.evaluation.hcp >= 12) return dbl();
+  return pass();
 }
 
 /**
@@ -1034,28 +1135,49 @@ export const RULES = [
     propose: () => dbl(),
   },
   {
-    id: 'R51-competitive-pass',
+    id: 'R51-competitive-constructive-fallback',
+    priority: 45,
+    description: 'Competitive safety-net: choose a legal constructive action before passing',
+    applies: c => c.phase === 'competitive',
+    propose: c => competitiveConstructiveFallback(c),
+  },
+  {
+    id: 'R52-rebid-constructive-fallback',
+    priority: 25,
+    description: 'Rebid safety-net: prefer legal rebid actions before default pass',
+    applies: c => c.phase === 'rebid',
+    propose: c => rebidConstructiveFallback(c),
+  },
+  {
+    id: 'R53-responding-constructive-fallback',
+    priority: 15,
+    description: 'Responding safety-net: choose legal constructive action before default pass',
+    applies: c => c.phase === 'responding',
+    propose: c => respondingConstructiveFallback(c),
+  },
+  {
+    id: 'R54-competitive-pass',
     priority: 40,
     description: 'Pass competitive hands without a constructive action',
     applies: c => c.phase === 'competitive',
     propose: () => pass(),
   },
   {
-    id: 'R52-rebid-default-pass',
+    id: 'R55-rebid-default-pass',
     priority: 20,
     description: 'Pass as rebid safety-net when no rebid rule applies',
     applies: c => c.phase === 'rebid',
     propose: () => pass(),
   },
   {
-    id: 'R53-responding-default-pass',
+    id: 'R56-responding-default-pass',
     priority: 10,
     description: 'Pass as responding safety-net when no responding rule applies',
     applies: c => c.phase === 'responding',
     propose: () => pass(),
   },
   {
-    id: 'R54-global-default-pass',
+    id: 'R57-global-default-pass',
     priority: 1,
     description: 'Global pass fallback',
     applies: c => c.phase !== 'passed-out',
