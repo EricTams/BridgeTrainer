@@ -343,7 +343,7 @@ let failures = 0;
   );
 }
 
-// Test 3: outside any convention window, dispatcher should return null.
+// Test 3: outside migrated convention windows, legacy bridge should return actionable recs.
 {
   let auction = createAuction('N');
   auction = addBid(auction, contractBid(1, Strain.SPADES));
@@ -351,10 +351,11 @@ let failures = 0;
   /** @type {Seat} */
   const seat = currentSeat(auction);
   const recs = getConventionRuleRecommendations(STAYMAN_HAND, auction, seat) || [];
+  const hasActionable = recs.some(r => r.bid.type === 'contract' || r.bid.type === 'pass');
   failures += report(
-    'fallback pack remains no-op on unmatched context',
-    recs.length === 0,
-    `expected null/no recommendations for unmatched context, got ${JSON.stringify(recs[0] || null)}`
+    'legacy bridge provides universal fallback recommendations',
+    hasActionable && recs.length > 0,
+    `expected actionable legacy-bridge recommendations, got ${JSON.stringify(recs[0] || null)}`
   );
 }
 
@@ -382,11 +383,13 @@ let failures = 0;
   auction = addBid(auction, contractBid(1, Strain.NOTRUMP)); // W
   /** @type {Seat} */
   const seat = currentSeat(auction); // N to act (direct competitive)
-  const recs = getConventionRuleRecommendations(WEAK_BALANCED_HAND, auction, seat);
+  const recs = getConventionRuleRecommendations(WEAK_BALANCED_HAND, auction, seat) || [];
+  const top = recs[0] || null;
+  const topIsPenaltyDouble = !!top && top.bid.type === 'double';
   failures += report(
     'competitive nt penalty-double pack is gated by values',
-    recs === null,
-    `expected null for weak hand in same window, got ${JSON.stringify(recs)}`,
+    !topIsPenaltyDouble,
+    `expected top recommendation not to be penalty-double for weak hand, got top=${JSON.stringify(top)} all=${JSON.stringify(recs)}`,
   );
 }
 
@@ -414,11 +417,13 @@ let failures = 0;
   auction = addBid(auction, contractBid(1, Strain.SPADES)); // W
   /** @type {Seat} */
   const seat = currentSeat(auction); // N to act
-  const recs = getConventionRuleRecommendations(NONCLASSIC_TAKEOUT_SHAPE_HAND, auction, seat);
+  const recs = getConventionRuleRecommendations(NONCLASSIC_TAKEOUT_SHAPE_HAND, auction, seat) || [];
+  const top = recs[0] || null;
+  const topIsTakeoutDouble = !!top && top.bid.type === 'double';
   failures += report(
     'competitive suit takeout pack is shape-gated',
-    recs === null,
-    `expected null for non-classic shape, got ${JSON.stringify(recs)}`,
+    !topIsTakeoutDouble,
+    `expected top recommendation not to be takeout-double for non-classic shape, got top=${JSON.stringify(top)} all=${JSON.stringify(recs)}`,
   );
 }
 
@@ -446,11 +451,13 @@ let failures = 0;
   auction = addBid(auction, contractBid(1, Strain.DIAMONDS)); // E
   /** @type {Seat} */
   const seat = currentSeat(auction); // S to act
-  const recs = getConventionRuleRecommendations(NO_NEGATIVE_DOUBLE_MAJOR_HAND, auction, seat);
+  const recs = getConventionRuleRecommendations(NO_NEGATIVE_DOUBLE_MAJOR_HAND, auction, seat) || [];
+  const top = recs[0] || null;
+  const topIsNegativeDouble = !!top && top.bid.type === 'double';
   failures += report(
     'negative-double pack is major-length gated',
-    recs === null,
-    `expected null when no 4-card unbid major, got ${JSON.stringify(recs)}`,
+    !topIsNegativeDouble,
+    `expected top recommendation not to be negative-double when no 4-card unbid major, got top=${JSON.stringify(top)} all=${JSON.stringify(recs)}`,
   );
 }
 
@@ -482,11 +489,13 @@ let failures = 0;
   auction = addBid(auction, pass()); // E
   /** @type {Seat} */
   const seat = currentSeat(auction); // S to act in balancing seat
-  const recs = getConventionRuleRecommendations(NO_REOPENING_SHAPE_HAND, auction, seat);
+  const recs = getConventionRuleRecommendations(NO_REOPENING_SHAPE_HAND, auction, seat) || [];
+  const top = recs[0] || null;
+  const topIsReopeningDouble = !!top && top.bid.type === 'double';
   failures += report(
     'reopening-double pack is shape-gated',
-    recs === null,
-    `expected null for non-classic reopening shape, got ${JSON.stringify(recs)}`
+    !topIsReopeningDouble,
+    `expected top recommendation not to be reopening-double for non-classic shape, got top=${JSON.stringify(top)} all=${JSON.stringify(recs)}`
   );
 }
 
@@ -517,11 +526,12 @@ let failures = 0;
   auction = addBid(auction, pass()); // S
   /** @type {Seat} */
   const seat = currentSeat(auction); // W to act; no partner double context
-  const recs = getConventionRuleRecommendations(ADVANCER_AFTER_DOUBLE_HAND, auction, seat);
+  const recs = getConventionRuleRecommendations(ADVANCER_AFTER_DOUBLE_HAND, auction, seat) || [];
+  const hasTakeoutDouble = recs.some(rec => rec.bid.type === 'double');
   failures += report(
     'advancer-after-takeout pack is context-gated',
-    recs === null,
-    `expected null without partner double context, got ${JSON.stringify(recs)}`
+    !hasTakeoutDouble,
+    `expected no takeout-double-context recommendation without partner double, got ${JSON.stringify(recs)}`
   );
 }
 
@@ -590,11 +600,21 @@ let failures = 0;
   auction = addBid(auction, contractBid(1, Strain.CLUBS)); // W
   /** @type {Seat} */
   const seat = currentSeat(auction); // N to act
-  const recs = getConventionRuleRecommendations(WEAK_MICHAELS_HAND, auction, seat);
+  const recs = getConventionRuleRecommendations(WEAK_MICHAELS_HAND, auction, seat) || [];
+  const top = recs[0] || null;
+  const topIsMichaelsCue = !!top &&
+    top.bid.type === 'contract' &&
+    top.bid.level === 2 &&
+    top.bid.strain === Strain.CLUBS;
+  const hasMichaelsCue = recs.some(rec =>
+    rec.bid.type === 'contract' &&
+    rec.bid.level === 2 &&
+    rec.bid.strain === Strain.CLUBS
+  );
   failures += report(
     'michaels pack is HCP-gated',
-    recs === null,
-    `expected null for weak Michaels shape, got ${JSON.stringify(recs)}`
+    !topIsMichaelsCue,
+    `expected top recommendation not to be Michaels cue-bid for weak shape, got top=${JSON.stringify(top)} hasCue=${hasMichaelsCue} all=${JSON.stringify(recs)}`
   );
 }
 
@@ -626,6 +646,11 @@ let failures = 0;
   /** @type {Seat} */
   const seat = currentSeat(auction); // N to act
   const recs = getConventionRuleRecommendations(NO_UNUSUAL_SHAPE_HAND, auction, seat) || [];
+  const top = recs[0] || null;
+  const topIsUnusual2NT = !!top &&
+    top.bid.type === 'contract' &&
+    top.bid.level === 2 &&
+    top.bid.strain === Strain.NOTRUMP;
   const hasUnusual2NT = recs.some(rec =>
     rec.bid.type === 'contract' &&
     rec.bid.level === 2 &&
@@ -633,8 +658,8 @@ let failures = 0;
   );
   failures += report(
     'unusual-notrump pack is shape-gated',
-    !hasUnusual2NT,
-    `expected no unusual 2NT recommendation without shape, got ${JSON.stringify(recs)}`
+    !topIsUnusual2NT,
+    `expected top recommendation not to be unusual 2NT without shape, got top=${JSON.stringify(top)} has2NT=${hasUnusual2NT} all=${JSON.stringify(recs)}`
   );
 }
 

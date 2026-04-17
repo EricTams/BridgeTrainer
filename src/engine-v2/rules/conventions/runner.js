@@ -9,6 +9,7 @@ import { advancerAfterTakeoutDoublePack } from './advancer-after-takeout-double.
 import { advancerAfterPenaltyDoublePack } from './advancer-after-penalty-double.js';
 import { negativeDoublePack } from './negative-double.js';
 import { negativeDoubleContinuationsPack } from './negative-double-continuations.js';
+import { legacyBridgePack } from './legacy-bridge.js';
 import { fallbackNoopPack } from './fallback-noop.js';
 
 /**
@@ -39,6 +40,7 @@ const CONVENTION_PACKS = Object.freeze([
   advancerAfterTakeoutDoublePack,
   negativeDoublePack,
   negativeDoubleContinuationsPack,
+  legacyBridgePack,
   fallbackNoopPack,
 ]);
 
