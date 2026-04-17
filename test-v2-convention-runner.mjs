@@ -206,16 +206,18 @@ let failures = 0;
   const hasSuitTakeoutPack = meta.some(m => m.id === 'competitive-suit-takeout-double');
   const hasNegativeDoublePack = meta.some(m => m.id === 'negative-double');
   const hasReopeningDoublePack = meta.some(m => m.id === 'reopening-double');
-  const hasAdvancerAfterDoublePack = meta.some(m => m.id === 'advancer-after-double');
+  const hasAdvancerAfterTakeoutPack = meta.some(m => m.id === 'advancer-after-takeout-double');
+  const hasAdvancerAfterPenaltyPack = meta.some(m => m.id === 'advancer-after-penalty-double');
   failures += report(
     'registry exposes multiple packs',
-    count >= 7 &&
+    count >= 8 &&
       hasCompetitivePack &&
       hasSuitTakeoutPack &&
       hasNegativeDoublePack &&
       hasReopeningDoublePack &&
-      hasAdvancerAfterDoublePack,
-    `expected >=7 packs and all competitive packs present, got count=${count} meta=${JSON.stringify(meta)}`,
+      hasAdvancerAfterTakeoutPack &&
+      hasAdvancerAfterPenaltyPack,
+    `expected >=8 packs and all competitive packs present, got count=${count} meta=${JSON.stringify(meta)}`,
   );
 }
 
@@ -388,7 +390,7 @@ let failures = 0;
   );
 }
 
-// Test 12: after partner's active double, advancer pack should trigger and return actionable calls.
+// Test 12: after partner's active takeout double, advancer-takeout pack should trigger.
 {
   let auction = createAuction('N');
   auction = addBid(auction, pass()); // N
@@ -401,13 +403,13 @@ let failures = 0;
   const top = recs[0] || null;
   const topIsActionable = !!top && (top.bid.type === 'contract' || top.bid.type === 'double' || top.bid.type === 'pass');
   failures += report(
-    'advancer-after-double pack triggers on active partner double',
+    'advancer-after-takeout pack triggers on active partner double',
     topIsActionable && recs.length >= 1,
     `expected non-empty recommendations in advancer window, got ${JSON.stringify(recs)}`
   );
 }
 
-// Test 13: without partner double, advancer-after-double pack should not trigger.
+// Test 13: without partner double, advancer-takeout pack should not trigger.
 {
   let auction = createAuction('N');
   auction = addBid(auction, pass()); // N
@@ -417,9 +419,47 @@ let failures = 0;
   const seat = currentSeat(auction); // W to act; no partner double context
   const recs = getConventionRuleRecommendations(ADVANCER_AFTER_DOUBLE_HAND, auction, seat);
   failures += report(
-    'advancer-after-double pack is context-gated',
+    'advancer-after-takeout pack is context-gated',
     recs === null,
     `expected null without partner double context, got ${JSON.stringify(recs)}`
+  );
+}
+
+// Test 14: after partner's NT double, advancer-penalty pack should prefer pass conversion.
+{
+  let auction = createAuction('N');
+  auction = addBid(auction, pass()); // N
+  auction = addBid(auction, contractBid(1, Strain.NOTRUMP)); // E
+  auction = addBid(auction, dbl()); // S (partner of N doubles NT)
+  auction = addBid(auction, pass()); // W
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // N to act
+  const recs = getConventionRuleRecommendations(ADVANCER_AFTER_DOUBLE_HAND, auction, seat) || [];
+  const top = recs[0] || null;
+  const topIsPass = !!top && top.bid.type === 'pass';
+  failures += report(
+    'advancer-after-penalty pack prefers pass conversion',
+    topIsPass,
+    `expected pass conversion after partner NT double, got ${JSON.stringify(top)}`
+  );
+}
+
+// Test 15: after partner's suit double, advancer-penalty pack should not force pass conversion behavior.
+{
+  let auction = createAuction('N');
+  auction = addBid(auction, pass()); // N
+  auction = addBid(auction, contractBid(1, Strain.HEARTS)); // E
+  auction = addBid(auction, dbl()); // S
+  auction = addBid(auction, pass()); // W
+  /** @type {Seat} */
+  const seat = currentSeat(auction); // N to act
+  const recs = getConventionRuleRecommendations(ADVANCER_AFTER_DOUBLE_HAND, auction, seat) || [];
+  const top = recs[0] || null;
+  const topIsNotForcedPass = !top || top.bid.type !== 'pass' || recs.length > 1;
+  failures += report(
+    'advancer-after-penalty pack is NT-context gated',
+    topIsNotForcedPass,
+    `expected non-NT-double flow (not forced pass conversion), got ${JSON.stringify(recs)}`
   );
 }
 

@@ -1,65 +1,43 @@
-import { contractBid, dbl, isLegalBid, pass, Strain } from '../../../model/bid.js';
-import {
-  findLastDoubledBid,
-  findOpponentBid,
-  hasPartnerDoubled,
-} from '../../../engine/context.js';
+import { contractBid, isLegalBid, pass, Strain } from '../../../model/bid.js';
 import { rec, suitLen } from './shared.js';
+import { getActivePartnerDoubleContext } from './advancer-shared.js';
 
 /**
  * @typedef {import('./context.js').ConventionContext} ConventionContext
  * @typedef {import('../../../engine/opening.js').BidRecommendation} BidRecommendation
  */
 
-const ADVANCER_PASS_MIN_HCP = 8;
-const ADVANCER_PASS_MIN_LEN = 5;
 const ADVANCER_SUIT_MIN_LEN = 4;
 const ADVANCER_STRONG_HCP = 12;
+const ADVANCER_PASS_MIN_HCP = 8;
+const ADVANCER_PASS_MIN_LEN = 5;
 
 /**
  * @param {ConventionContext} ctx
  * @returns {boolean}
  */
-function shouldUseAdvancerAfterDoublePack(ctx) {
-  if (ctx.phase !== 'competitive') return false;
-  if (ctx.myFirst || ctx.partnerFirst) return false;
-  if (!hasPartnerDoubled(ctx.auction, ctx.seat)) return false;
-
-  const partner = partnerSeat(ctx.seat);
-  const doubledBid = findLastDoubledBid(ctx.auction, partner);
-  if (!doubledBid) return false;
-
-  const oppBid = findOpponentBid(ctx.auction, ctx.seat);
-  if (!oppBid) return false;
-  return isLegalBid(ctx.auction, pass());
+function shouldUseAdvancerAfterTakeoutDoublePack(ctx) {
+  const window = getActivePartnerDoubleContext(ctx);
+  if (!window) return false;
+  return window.doubledBid.strain !== Strain.NOTRUMP;
 }
 
 /**
  * @param {ConventionContext} ctx
  * @returns {BidRecommendation[] | null}
  */
-function runAdvancerAfterDoublePack(ctx) {
-  if (!shouldUseAdvancerAfterDoublePack(ctx)) return null;
+function runAdvancerAfterTakeoutDoublePack(ctx) {
+  const window = getActivePartnerDoubleContext(ctx);
+  if (!window) return null;
+  if (window.doubledBid.strain === Strain.NOTRUMP) return null;
 
-  const partner = partnerSeat(ctx.seat);
-  const doubledBid = findLastDoubledBid(ctx.auction, partner);
-  const oppBid = findOpponentBid(ctx.auction, ctx.seat);
-  if (!doubledBid || !oppBid) return null;
-
+  const { oppBid } = window;
   const hcp = ctx.eval_.hcp;
   const shape = ctx.eval_.shape;
   const oppLen = oppBid.strain === Strain.NOTRUMP ? 0 : suitLen(shape, oppBid.strain);
 
-  // Direct penalty conversion over partner's NT double: keep this class narrow.
-  if (doubledBid.strain === Strain.NOTRUMP && oppBid.strain === Strain.NOTRUMP) {
-    return [rec(pass(), 10, `${hcp} HCP: pass to convert partner's NT double`)];
-  }
-
-  const passPriority = passPriorityForAdvance(hcp, oppLen);
-  const passExpl = passExplanation(hcp, oppLen, oppBid.strain);
-
   /** @type {BidRecommendation[]} */
-  const results = [rec(pass(), passPriority, passExpl)];
+  const results = [rec(pass(), passPriority(hcp, oppLen), passExplanation(hcp, oppLen, oppBid.strain))];
 
   const suitBid = bestSuitAdvance(ctx, oppBid);
   if (suitBid) results.push(suitBid);
@@ -70,10 +48,6 @@ function runAdvancerAfterDoublePack(ctx) {
   const cueBid = cueAdvance(ctx, oppBid);
   if (cueBid) results.push(cueBid);
 
-  // Keep this pack narrow: only add double when opponents escaped a NT penalty double.
-  if (doubledBid.strain === Strain.NOTRUMP && oppBid.strain !== Strain.NOTRUMP && isLegalBid(ctx.auction, dbl())) {
-    results.push(rec(dbl(), 9, `${hcp} HCP: penalty double of opponent escape`));
-  }
   return results;
 }
 
@@ -82,7 +56,7 @@ function runAdvancerAfterDoublePack(ctx) {
  * @param {number} oppLen
  * @returns {number}
  */
-function passPriorityForAdvance(hcp, oppLen) {
+function passPriority(hcp, oppLen) {
   if (hcp >= ADVANCER_PASS_MIN_HCP && oppLen >= ADVANCER_PASS_MIN_LEN) return 10;
   if (hcp >= ADVANCER_PASS_MIN_HCP) return 6;
   return 4;
@@ -98,12 +72,12 @@ function passExplanation(hcp, oppLen, oppStrain) {
   if (oppLen >= ADVANCER_PASS_MIN_LEN && hcp >= ADVANCER_PASS_MIN_HCP) {
     return `${oppLen} ${strainName(oppStrain)} with ${hcp} HCP: convert to penalty`;
   }
-  return `${hcp} HCP: pass as fallback after partner's double`;
+  return `${hcp} HCP: pass as fallback after partner's takeout double`;
 }
 
 /**
  * @param {ConventionContext} ctx
- * @param {'C'|'D'|'H'|'S'|'NT'} oppStrain
+ * @param {import('../../../model/bid.js').ContractBid} oppBid
  * @returns {BidRecommendation | null}
  */
 function bestSuitAdvance(ctx, oppBid) {
@@ -134,7 +108,7 @@ function suitAdvancePriority(hcp, len) {
 
 /**
  * @param {ConventionContext} ctx
- * @param {'C'|'D'|'H'|'S'|'NT'} oppStrain
+ * @param {import('../../../model/bid.js').ContractBid} oppBid
  * @returns {BidRecommendation | null}
  */
 function ntAdvance(ctx, oppBid) {
@@ -159,7 +133,7 @@ function cueAdvance(ctx, oppBid) {
   if (level <= 0) return null;
   const bid = contractBid(level, oppBid.strain);
   if (!isLegalBid(ctx.auction, bid)) return null;
-  return rec(bid, 8, `${ctx.eval_.hcp} HCP: cue bid advance after partner's double`);
+  return rec(bid, 8, `${ctx.eval_.hcp} HCP: cue bid advance after partner's takeout double`);
 }
 
 /**
@@ -211,22 +185,11 @@ function strainName(strain) {
 }
 
 /**
- * @param {'N'|'E'|'S'|'W'} seat
- * @returns {'N'|'E'|'S'|'W'}
- */
-function partnerSeat(seat) {
-  if (seat === 'N') return 'S';
-  if (seat === 'S') return 'N';
-  if (seat === 'E') return 'W';
-  return 'E';
-}
-
-/**
  * @type {{ id: string, priority: number, when: (ctx: ConventionContext) => boolean, run: (ctx: ConventionContext) => BidRecommendation[] | null }}
  */
-export const advancerAfterDoublePack = {
-  id: 'advancer-after-double',
+export const advancerAfterTakeoutDoublePack = {
+  id: 'advancer-after-takeout-double',
   priority: 54,
-  when: shouldUseAdvancerAfterDoublePack,
-  run: runAdvancerAfterDoublePack,
+  when: shouldUseAdvancerAfterTakeoutDoublePack,
+  run: runAdvancerAfterTakeoutDoublePack,
 };

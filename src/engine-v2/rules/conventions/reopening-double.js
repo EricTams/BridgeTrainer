@@ -6,17 +6,16 @@ import {
   reopeningWithoutOwnBid,
 } from '../../../engine/context.js';
 import { rec, suitLen } from './shared.js';
+import {
+  hasClassicTakeoutShape,
+  takeoutDoubleMinHcp,
+} from './advancer-shared.js';
 
 /**
  * @typedef {import('./context.js').ConventionContext} ConventionContext
  * @typedef {import('../../../engine/opening.js').BidRecommendation} BidRecommendation
  */
 
-const REOPEN_BASE_MIN_HCP = 12;
-const REOPEN_LEVEL_STEP = 2;
-const REOPEN_BALANCING_DISCOUNT = 3;
-const REOPEN_VOID_BONUS = 2;
-const REOPEN_SINGLETON_BONUS = 1;
 const REOPEN_STRONG_HCP = 17;
 
 /**
@@ -37,7 +36,7 @@ function shouldUseReopeningDoublePack(ctx) {
   if (!isLegalBid(ctx.auction, reopeningDouble)) return false;
 
   const oppLen = suitLen(ctx.eval_.shape, oppBid.strain);
-  const minHcp = reopeningDoubleMinHcp(oppBid.level, oppLen);
+  const minHcp = takeoutDoubleMinHcp(oppBid.level, oppLen, true);
   if (ctx.eval_.hcp < minHcp) return false;
   if (ctx.eval_.hcp >= REOPEN_STRONG_HCP) return true;
   return hasClassicTakeoutShape(ctx.eval_.shape, oppBid.strain);
@@ -60,43 +59,6 @@ function runReopeningDoublePack(ctx) {
     rec(dbl(), 10, dblExpl),
     rec(pass(), 4, passExpl),
   ];
-}
-
-/**
- * @param {number} oppLevel
- * @param {number} oppLen
- * @returns {number}
- */
-function reopeningDoubleMinHcp(oppLevel, oppLen) {
-  const levelExtra = Math.max(0, oppLevel - 1) * REOPEN_LEVEL_STEP;
-  const shapeAdj = oppLen === 0 ? REOPEN_VOID_BONUS : oppLen === 1 ? REOPEN_SINGLETON_BONUS : 0;
-  return Math.max(9, REOPEN_BASE_MIN_HCP + levelExtra - REOPEN_BALANCING_DISCOUNT - shapeAdj);
-}
-
-/**
- * @param {number[]} shape
- * @param {'C'|'D'|'H'|'S'} oppStrain
- * @returns {boolean}
- */
-function hasClassicTakeoutShape(shape, oppStrain) {
-  const oppLen = suitLen(shape, oppStrain);
-  if (oppLen > 2) return false;
-  return shortestUnbidSuit(shape, oppStrain) >= 3;
-}
-
-/**
- * @param {number[]} shape
- * @param {'C'|'D'|'H'|'S'} oppStrain
- * @returns {number}
- */
-function shortestUnbidSuit(shape, oppStrain) {
-  const suits = [Strain.SPADES, Strain.HEARTS, Strain.DIAMONDS, Strain.CLUBS];
-  let shortest = 13;
-  for (const suit of suits) {
-    if (suit === oppStrain) continue;
-    shortest = Math.min(shortest, suitLen(shape, suit));
-  }
-  return shortest;
 }
 
 /**
