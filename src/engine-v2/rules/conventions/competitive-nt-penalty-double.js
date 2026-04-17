@@ -1,11 +1,10 @@
 import { dbl, isLegalBid, pass, Strain } from '../../../model/bid.js';
 import {
   directCompetitiveContextPrefix,
-  findOpponentBid,
-  hasPartnerDoubled,
   isBalancingSeat,
 } from '../../../engine/context.js';
 import { rec } from './shared.js';
+import { getDirectCompetitiveNtWindow } from './advancer-shared.js';
 
 /**
  * @typedef {import('./context.js').ConventionContext} ConventionContext
@@ -20,12 +19,9 @@ const BALANCING_DISCOUNT = 3;
  * @returns {boolean}
  */
 function shouldUseCompetitiveNTPenaltyDoublePack(ctx) {
-  if (ctx.phase !== 'competitive') return false;
-  if (ctx.myFirst || ctx.partnerFirst) return false;
-  if (hasPartnerDoubled(ctx.auction, ctx.seat)) return false;
-
-  const oppBid = findOpponentBid(ctx.auction, ctx.seat);
-  if (!oppBid || oppBid.strain !== Strain.NOTRUMP) return false;
+  const window = getDirectCompetitiveNtWindow(ctx, { maxOppLevel: 2 });
+  if (!window) return false;
+  const { oppBid } = window;
   if (oppBid.level !== 1 && oppBid.level !== 2) return false;
 
   const penaltyDouble = dbl();
@@ -42,8 +38,9 @@ function shouldUseCompetitiveNTPenaltyDoublePack(ctx) {
 function runCompetitiveNTPenaltyDoublePack(ctx) {
   if (!shouldUseCompetitiveNTPenaltyDoublePack(ctx)) return null;
 
-  const oppBid = findOpponentBid(ctx.auction, ctx.seat);
-  if (!oppBid) return null;
+  const window = getDirectCompetitiveNtWindow(ctx, { maxOppLevel: 2 });
+  if (!window) return null;
+  const { oppBid } = window;
 
   const prefix = directCompetitiveContextPrefix(ctx.auction, ctx.seat);
   const hcp = ctx.eval_.hcp;

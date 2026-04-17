@@ -3,6 +3,8 @@ import {
   findLastDoubledBid,
   findOpponentBid,
   hasPartnerDoubled,
+  isBalancingSeat,
+  seatHasPassed,
 } from '../../../engine/context.js';
 
 /**
@@ -28,6 +30,54 @@ export function getActivePartnerDoubleContext(ctx) {
 }
 
 /**
+ * Narrow "direct overcall" style competitive window.
+ * Avoids firing convention packs in balancing/passed-hand cleanup auctions.
+ * @param {ConventionContext} ctx
+ * @param {{ maxOppLevel?: number }} [opts]
+ * @returns {{ oppBid: import('../../../model/bid.js').ContractBid } | null}
+ */
+export function getDirectCompetitiveOvercallWindow(ctx, opts = {}) {
+  const maxOppLevel = opts.maxOppLevel ?? 2;
+  const oppBid = directCompetitiveOppBid(ctx, maxOppLevel);
+  if (!oppBid || oppBid.strain === Strain.NOTRUMP) return null;
+  return { oppBid };
+}
+
+/**
+ * Narrow direct-overcall NT window for penalty-double style packs.
+ * @param {ConventionContext} ctx
+ * @param {{ maxOppLevel?: number }} [opts]
+ * @returns {{ oppBid: import('../../../model/bid.js').ContractBid } | null}
+ */
+export function getDirectCompetitiveNtWindow(ctx, opts = {}) {
+  const maxOppLevel = opts.maxOppLevel ?? 2;
+  const oppBid = directCompetitiveOppBid(ctx, maxOppLevel);
+  if (!oppBid || oppBid.strain !== Strain.NOTRUMP) return null;
+  return { oppBid };
+}
+
+/**
+ * Shared direct-overcall opp-bid gate.
+ * @param {ConventionContext} ctx
+ * @param {number} maxOppLevel
+ * @returns {import('../../../model/bid.js').ContractBid | null}
+ */
+function directCompetitiveOppBid(ctx, maxOppLevel) {
+  if (ctx.phase !== 'competitive') return null;
+  if (ctx.myFirst || ctx.partnerFirst) return null;
+  if (hasPartnerDoubled(ctx.auction, ctx.seat)) return null;
+  if (seatHasPassed(ctx.auction, ctx.seat)) return null;
+  if (isBalancingSeat(ctx.auction)) return null;
+  if (countContractBids(ctx.auction) !== 1) return null;
+  if (hasAnyDouble(ctx.auction)) return null;
+
+  const oppBid = findOpponentBid(ctx.auction, ctx.seat);
+  if (!oppBid) return null;
+  if (oppBid.level > maxOppLevel) return null;
+  return oppBid;
+}
+
+/**
  * @param {'N'|'E'|'S'|'W'} seat
  * @returns {'N'|'E'|'S'|'W'}
  */
@@ -43,6 +93,9 @@ const TAKEOUT_LEVEL_STEP = 2;
 const BALANCING_DISCOUNT = 3;
 const VOID_SHAPE_BONUS = 2;
 const SINGLETON_SHAPE_BONUS = 1;
+const TAKEOUT_STRONG_HCP = 17;
+export const DIRECT_OVERCALL_MIN_TWO_SUITER_HCP = 8;
+export const DIRECT_OVERCALL_STRONG_TWO_SUITER_HCP = 16;
 
 /**
  * Shared threshold helper used by takeout/reopening-style doubles.
@@ -59,6 +112,76 @@ export function takeoutDoubleMinHcp(oppLevel, oppLen, balancing) {
 }
 
 /**
+ * Shared gate for takeout/reopening style doubles.
+ * @param {number[]} shape
+ * @param {number} hcp
+ * @param {import('../../../model/bid.js').ContractBid} oppBid
+ * @param {boolean} balancing
+ * @returns {boolean}
+ */
+export function qualifiesTakeoutDoubleProfile(shape, hcp, oppBid, balancing) {
+  const oppLen = suitLen(shape, oppBid.strain);
+  const minHcp = takeoutDoubleMinHcp(oppBid.level, oppLen, balancing);
+  return qualifiesTakeoutOrStrong(hcp, minHcp, TAKEOUT_STRONG_HCP, shape, oppBid.strain);
+}
+
+/**
+ * Shared takeout/reopening acceptance gate.
+ * @param {number} hcp
+ * @param {number} minHcp
+ * @param {number} strongHcp
+ * @param {number[]} shape
+ * @param {'C'|'D'|'H'|'S'} oppStrain
+ * @returns {boolean}
+ */
+export function qualifiesTakeoutOrStrong(hcp, minHcp, strongHcp, shape, oppStrain) {
+  if (hcp < minHcp) return false;
+  if (hcp >= strongHcp) return true;
+  return hasClassicTakeoutShape(shape, oppStrain);
+}
+
+/**
+ * Shared takeout-double gate with optional shape predicate override.
+ * @param {number[]} shape
+ * @param {number} hcp
+ * @param {'C'|'D'|'H'|'S'} oppStrain
+ * @param {number} minHcp
+ * @param {number} strongHcp
+ * @param {(shape: number[], oppStrain: 'C'|'D'|'H'|'S') => boolean} [shapeGate]
+ * @returns {boolean}
+ */
+export function qualifiesTakeoutDouble(shape, hcp, oppStrain, minHcp, strongHcp, shapeGate = hasClassicTakeoutShape) {
+  if (hcp < minHcp) return false;
+  if (hcp >= strongHcp) return true;
+  return shapeGate(shape, oppStrain);
+}
+
+/**
+ * Shared two-suiter gate for direct competitive convention windows.
+ * @param {number[]} shape
+ * @param {number} hcp
+ * @param {Array<'C'|'D'|'H'|'S'>} suits
+ * @param {{
+ *   minLenEach: number,
+ *   strongLenA: number,
+ *   strongLenB: number,
+ *   minHcp: number,
+ *   maxHcp: number,
+ *   strongShapeMinHcp: number
+ * }} cfg
+ * @returns {boolean}
+ */
+export function qualifiesTwoSuiterByHcpShape(shape, hcp, suits, cfg) {
+  const lenA = suitLen(shape, suits[0]);
+  const lenB = suitLen(shape, suits[1]);
+  const bothReady = lenA >= cfg.minLenEach && lenB >= cfg.minLenEach;
+  if (!bothReady) return false;
+  const strongShape = lenA >= cfg.strongLenA && lenB >= cfg.strongLenB;
+  if (strongShape) return hcp >= cfg.strongShapeMinHcp;
+  return hcp >= cfg.minHcp && hcp <= cfg.maxHcp;
+}
+
+/**
  * Shared classic takeout-shape gate.
  * @param {number[]} shape
  * @param {'C'|'D'|'H'|'S'} oppStrain
@@ -68,6 +191,19 @@ export function hasClassicTakeoutShape(shape, oppStrain) {
   const oppLen = suitLen(shape, oppStrain);
   if (oppLen > 2) return false;
   return shortestUnbidSuit(shape, oppStrain) >= 3;
+}
+
+/**
+ * Shared two-suit length gate used by overcall conventions.
+ * @param {number[]} shape
+ * @param {'C'|'D'|'H'|'S'} suitA
+ * @param {number} minA
+ * @param {'C'|'D'|'H'|'S'} suitB
+ * @param {number} minB
+ * @returns {boolean}
+ */
+export function hasTwoSuitLengths(shape, suitA, minA, suitB, minB) {
+  return suitLen(shape, suitA) >= minA && suitLen(shape, suitB) >= minB;
 }
 
 /**
@@ -157,5 +293,16 @@ function countContractBids(auction) {
     if (bid.type === 'contract') count++;
   }
   return count;
+}
+
+/**
+ * @param {import('../../../model/bid.js').Auction} auction
+ * @returns {boolean}
+ */
+function hasAnyDouble(auction) {
+  for (const bid of auction.bids) {
+    if (bid.type === 'double' || bid.type === 'redouble') return true;
+  }
+  return false;
 }
 

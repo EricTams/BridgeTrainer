@@ -1,13 +1,10 @@
 import { dbl, isLegalBid, pass, Strain } from '../../../model/bid.js';
-import {
-  directCompetitiveContextPrefix,
-  findOpponentBid,
-  hasPartnerDoubled,
-  isBalancingSeat,
-} from '../../../engine/context.js';
+import { directCompetitiveContextPrefix, isBalancingSeat } from '../../../engine/context.js';
 import { rec, suitLen } from './shared.js';
 import {
+  getDirectCompetitiveOvercallWindow,
   hasClassicTakeoutShape,
+  qualifiesTakeoutDouble,
   takeoutDoubleMinHcp,
 } from './advancer-shared.js';
 
@@ -23,25 +20,25 @@ const TAKEOUT_STRONG_HCP = 17;
  * @returns {boolean}
  */
 function shouldUseCompetitiveSuitTakeoutDoublePack(ctx) {
-  if (ctx.phase !== 'competitive') return false;
-  if (ctx.myFirst || ctx.partnerFirst) return false;
-  if (hasPartnerDoubled(ctx.auction, ctx.seat)) return false;
-
-  const oppBid = findOpponentBid(ctx.auction, ctx.seat);
-  if (!oppBid || oppBid.strain === Strain.NOTRUMP) return false;
+  const window = getDirectCompetitiveOvercallWindow(ctx, { maxOppLevel: 7 });
+  if (!window) return false;
+  const { oppBid } = window;
 
   const takeoutDouble = dbl();
   if (!isLegalBid(ctx.auction, takeoutDouble)) return false;
 
-  const minHcp = takeoutDoubleMinHcp(
-    oppBid.level,
-    suitLen(ctx.eval_.shape, oppBid.strain),
-    isBalancingSeat(ctx.auction),
+  return qualifiesTakeoutDouble(
+    ctx.eval_.shape,
+    ctx.eval_.hcp,
+    oppBid.strain,
+    takeoutDoubleMinHcp(
+      oppBid.level,
+      suitLen(ctx.eval_.shape, oppBid.strain),
+      isBalancingSeat(ctx.auction),
+    ),
+    TAKEOUT_STRONG_HCP,
+    hasClassicTakeoutShape,
   );
-  if (ctx.eval_.hcp < minHcp) return false;
-
-  if (ctx.eval_.hcp >= TAKEOUT_STRONG_HCP) return true;
-  return hasClassicTakeoutShape(ctx.eval_.shape, oppBid.strain);
 }
 
 /**
@@ -51,8 +48,9 @@ function shouldUseCompetitiveSuitTakeoutDoublePack(ctx) {
 function runCompetitiveSuitTakeoutDoublePack(ctx) {
   if (!shouldUseCompetitiveSuitTakeoutDoublePack(ctx)) return null;
 
-  const oppBid = findOpponentBid(ctx.auction, ctx.seat);
-  if (!oppBid) return null;
+  const window = getDirectCompetitiveOvercallWindow(ctx, { maxOppLevel: 7 });
+  if (!window) return null;
+  const { oppBid } = window;
 
   const prefix = directCompetitiveContextPrefix(ctx.auction, ctx.seat);
   const hcp = ctx.eval_.hcp;

@@ -1,13 +1,16 @@
 import { contractBid, isLegalBid, pass, Strain } from '../../../model/bid.js';
-import { findOpponentBid, hasPartnerDoubled } from '../../../engine/context.js';
 import { rec, suitLen } from './shared.js';
+import {
+  DIRECT_OVERCALL_MIN_TWO_SUITER_HCP,
+  getDirectCompetitiveOvercallWindow,
+} from './advancer-shared.js';
 
 /**
  * @typedef {import('./context.js').ConventionContext} ConventionContext
  * @typedef {import('../../../engine/opening.js').BidRecommendation} BidRecommendation
  */
 
-const UNUSUAL_NT_MIN_HCP = 10;
+const UNUSUAL_NT_MIN_HCP = DIRECT_OVERCALL_MIN_TWO_SUITER_HCP;
 const UNUSUAL_NT_MIN_CLUBS = 5;
 const UNUSUAL_NT_MIN_DIAMONDS = 5;
 const UNUSUAL_NT_MIN_HEARTS = 5;
@@ -18,19 +21,15 @@ const UNUSUAL_NT_MIN_SPADES = 5;
  * @returns {boolean}
  */
 function shouldUseUnusualNotrumpPack(ctx) {
-  if (ctx.phase !== 'competitive') return false;
-  if (ctx.myFirst || ctx.partnerFirst) return false;
-  if (hasPartnerDoubled(ctx.auction, ctx.seat)) return false;
-
-  const oppBid = findOpponentBid(ctx.auction, ctx.seat);
-  if (!oppBid || oppBid.strain === Strain.NOTRUMP) return false;
-  if (oppBid.level !== 1) return false;
+  const window = getDirectCompetitiveOvercallWindow(ctx, { maxOppLevel: 1 });
+  if (!window) return false;
+  const { oppBid } = window;
 
   const unusualBid = contractBid(oppBid.level + 1, Strain.NOTRUMP);
   if (!isLegalBid(ctx.auction, unusualBid)) return false;
 
-  return unusualShapeReady(ctx.eval_.shape, oppBid.strain) &&
-    ctx.eval_.hcp >= UNUSUAL_NT_MIN_HCP;
+  if (ctx.eval_.hcp < UNUSUAL_NT_MIN_HCP) return false;
+  return unusualShapeReady(ctx.eval_.shape, oppBid.strain);
 }
 
 /**
@@ -39,9 +38,9 @@ function shouldUseUnusualNotrumpPack(ctx) {
  */
 function runUnusualNotrumpPack(ctx) {
   if (!shouldUseUnusualNotrumpPack(ctx)) return null;
-
-  const oppBid = findOpponentBid(ctx.auction, ctx.seat);
-  if (!oppBid) return null;
+  const window = getDirectCompetitiveOvercallWindow(ctx, { maxOppLevel: 1 });
+  if (!window) return null;
+  const { oppBid } = window;
 
   const unusualBid = contractBid(oppBid.level + 1, Strain.NOTRUMP);
   if (!isLegalBid(ctx.auction, unusualBid)) return null;

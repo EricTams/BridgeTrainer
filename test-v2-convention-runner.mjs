@@ -216,17 +216,17 @@ const WEAK_MICHAELS_HAND = createHand([
 const UNUSUAL_NT_HAND = createHand([
   createCard(Suit.SPADES, Rank.KING),
   createCard(Suit.SPADES, Rank.FOUR),
+  createCard(Suit.SPADES, Rank.TWO),
+  createCard(Suit.HEARTS, Rank.QUEEN),
+  createCard(Suit.HEARTS, Rank.JACK),
   createCard(Suit.HEARTS, Rank.NINE),
-  createCard(Suit.DIAMONDS, Rank.ACE),
-  createCard(Suit.DIAMONDS, Rank.QUEEN),
+  createCard(Suit.HEARTS, Rank.SEVEN),
+  createCard(Suit.HEARTS, Rank.FIVE),
+  createCard(Suit.DIAMONDS, Rank.KING),
   createCard(Suit.DIAMONDS, Rank.JACK),
   createCard(Suit.DIAMONDS, Rank.EIGHT),
   createCard(Suit.DIAMONDS, Rank.FIVE),
-  createCard(Suit.CLUBS, Rank.ACE),
-  createCard(Suit.CLUBS, Rank.KING),
-  createCard(Suit.CLUBS, Rank.JACK),
-  createCard(Suit.CLUBS, Rank.SEVEN),
-  createCard(Suit.CLUBS, Rank.THREE),
+  createCard(Suit.DIAMONDS, Rank.THREE),
 ]);
 
 const NO_UNUSUAL_SHAPE_HAND = createHand([
@@ -568,12 +568,11 @@ let failures = 0;
 
 // Test 18: Unusual 2NT window should activate and include 2NT recommendation.
 {
-  let auction = createAuction('E');
-  auction = addBid(auction, contractBid(1, Strain.HEARTS)); // E
+  let auction = createAuction('S');
   auction = addBid(auction, pass()); // S
-  auction = addBid(auction, pass()); // W
+  auction = addBid(auction, contractBid(1, Strain.CLUBS)); // W
   /** @type {Seat} */
-  const seat = currentSeat(auction); // N to act (not reopening seat)
+  const seat = currentSeat(auction); // N to act (direct overcall seat)
   const recs = getConventionRuleRecommendations(UNUSUAL_NT_HAND, auction, seat) || [];
   const hasUnusual2NT = recs.some(rec =>
     rec.bid.type === 'contract' &&
@@ -589,10 +588,9 @@ let failures = 0;
 
 // Test 19: missing two-lower-suits shape should not trigger unusual notrump pack.
 {
-  let auction = createAuction('E');
-  auction = addBid(auction, contractBid(1, Strain.HEARTS)); // E
+  let auction = createAuction('S');
   auction = addBid(auction, pass()); // S
-  auction = addBid(auction, pass()); // W
+  auction = addBid(auction, contractBid(1, Strain.CLUBS)); // W
   /** @type {Seat} */
   const seat = currentSeat(auction); // N to act
   const recs = getConventionRuleRecommendations(NO_UNUSUAL_SHAPE_HAND, auction, seat) || [];

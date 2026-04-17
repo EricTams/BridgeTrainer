@@ -7,6 +7,7 @@ import {
 } from '../../../engine/context.js';
 import { rec, suitLen } from './shared.js';
 import {
+  qualifiesTakeoutOrStrong,
   hasClassicTakeoutShape,
   takeoutDoubleMinHcp,
 } from './advancer-shared.js';
@@ -37,9 +38,7 @@ function shouldUseReopeningDoublePack(ctx) {
 
   const oppLen = suitLen(ctx.eval_.shape, oppBid.strain);
   const minHcp = takeoutDoubleMinHcp(oppBid.level, oppLen, true);
-  if (ctx.eval_.hcp < minHcp) return false;
-  if (ctx.eval_.hcp >= REOPEN_STRONG_HCP) return true;
-  return hasClassicTakeoutShape(ctx.eval_.shape, oppBid.strain);
+  return qualifiesTakeoutOrStrong(ctx.eval_.hcp, minHcp, REOPEN_STRONG_HCP, ctx.eval_.shape, oppBid.strain);
 }
 
 /**

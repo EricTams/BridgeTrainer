@@ -1,6 +1,9 @@
 import { contractBid, isLegalBid, pass, Strain } from '../../../model/bid.js';
-import { findOpponentBid, hasPartnerDoubled } from '../../../engine/context.js';
 import { rec, suitLen } from './shared.js';
+import {
+  getDirectCompetitiveOvercallWindow,
+  qualifiesTwoSuiterByHcpShape,
+} from './advancer-shared.js';
 
 /**
  * @typedef {import('./context.js').ConventionContext} ConventionContext
@@ -18,17 +21,25 @@ const MICHAELS_STRONG_MINOR_MIN = 5;
  * @returns {boolean}
  */
 function shouldUseMichaelsPack(ctx) {
-  if (ctx.phase !== 'competitive') return false;
-  if (ctx.myFirst || ctx.partnerFirst) return false;
-  if (hasPartnerDoubled(ctx.auction, ctx.seat)) return false;
-
-  const oppBid = findOpponentBid(ctx.auction, ctx.seat);
-  if (!oppBid || oppBid.strain === Strain.NOTRUMP) return false;
-  if (oppBid.level !== 1) return false;
+  const window = getDirectCompetitiveOvercallWindow(ctx, { maxOppLevel: 1 });
+  if (!window) return false;
+  const { oppBid } = window;
 
   const cueBid = michaelsCueBid(oppBid);
   if (!cueBid || !isLegalBid(ctx.auction, cueBid)) return false;
-  return qualifiesMichaelsShape(ctx.eval_.shape, ctx.eval_.hcp, oppBid.strain);
+  return qualifiesTwoSuiterByHcpShape(
+    ctx.eval_.shape,
+    ctx.eval_.hcp,
+    michaelsSuitsForOpp(oppBid.strain),
+    {
+      minLenEach: MICHAELS_MIN_LEN,
+      strongLenA: 6,
+      strongLenB: MICHAELS_STRONG_MINOR_MIN,
+      minHcp: MICHAELS_MIN_HCP,
+      maxHcp: MICHAELS_STRONG_HCP,
+      strongShapeMinHcp: MICHAELS_6_5_HCP,
+    },
+  );
 }
 
 /**
@@ -38,8 +49,9 @@ function shouldUseMichaelsPack(ctx) {
 function runMichaelsPack(ctx) {
   if (!shouldUseMichaelsPack(ctx)) return null;
 
-  const oppBid = findOpponentBid(ctx.auction, ctx.seat);
-  if (!oppBid) return null;
+  const window = getDirectCompetitiveOvercallWindow(ctx, { maxOppLevel: 1 });
+  if (!window) return null;
+  const { oppBid } = window;
 
   const cueBid = michaelsCueBid(oppBid);
   if (!cueBid) return null;
@@ -65,25 +77,6 @@ function runMichaelsPack(ctx) {
 function michaelsCueBid(oppBid) {
   if (oppBid.level >= 7) return null;
   return contractBid(oppBid.level + 1, oppBid.strain);
-}
-
-/**
- * @param {number[]} shape
- * @param {number} hcp
- * @param {'C'|'D'|'H'|'S'} oppStrain
- * @returns {boolean}
- */
-function qualifiesMichaelsShape(shape, hcp, oppStrain) {
-  const pair = michaelsSuitsForOpp(oppStrain);
-  const lenA = suitLen(shape, pair[0]);
-  const lenB = suitLen(shape, pair[1]);
-  const bothFive = lenA >= MICHAELS_MIN_LEN && lenB >= MICHAELS_MIN_LEN;
-  if (!bothFive) return false;
-
-  if (lenA >= 6 && lenB >= MICHAELS_STRONG_MINOR_MIN) {
-    return hcp >= MICHAELS_6_5_HCP;
-  }
-  return hcp >= MICHAELS_MIN_HCP && hcp <= MICHAELS_STRONG_HCP;
 }
 
 /**
