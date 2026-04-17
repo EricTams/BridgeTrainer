@@ -1,6 +1,15 @@
 import { isLegalBid } from '../model/bid.js';
 import { evaluate } from './evaluate.js';
-import { classifyAuction, findPartnerBid, findOwnBid, findOpponentBid } from './context.js';
+import {
+  classifyAuction,
+  countOwnBids,
+  findOpponentBid,
+  findOwnBid,
+  findOwnLastBid,
+  findPartnerBid,
+  findPartnerLastBid,
+  isOpener,
+} from './context.js';
 import { RULES } from './ruleset.js';
 
 /**
@@ -75,8 +84,12 @@ function buildRuleContext(hand, auction, seat) {
     evaluation: evaluate(hand),
     phase: cls.phase,
     seatPosition: cls.seatPosition,
+    ownBidCount: countOwnBids(auction, seat),
+    opener: isOpener(auction, seat),
     ownBid: findOwnBid(auction, seat),
+    ownLastBid: findOwnLastBid(auction, seat),
     partnerBid: findPartnerBid(auction, seat),
+    partnerLastBid: findPartnerLastBid(auction, seat),
     opponentBid: findOpponentBid(auction, seat),
   };
 }
