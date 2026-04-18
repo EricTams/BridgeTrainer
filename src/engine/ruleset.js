@@ -1197,7 +1197,10 @@ export const RULES = [
       hasFourCardMajor(c) &&
       c.partnerBid?.strain !== Strain.NOTRUMP &&
       !(c.partnerBid && c.partnerBid.strain === Strain.SPADES &&
-        isSemiOrBalanced(c) && c.evaluation.hcp >= 13),
+        isSemiOrBalanced(c) && c.evaluation.hcp >= 13) &&
+      !(c.partnerBid && (c.partnerBid.strain === Strain.HEARTS || c.partnerBid.strain === Strain.SPADES) &&
+        suitLength(c, c.partnerBid.strain) >= 3 &&
+        c.evaluation.hcp >= 6 && c.evaluation.hcp <= 12),
     propose: c => {
       const partner = c.partnerBid;
       if (!partner) return contractBid(1, Strain.SPADES);
@@ -1210,16 +1213,10 @@ export const RULES = [
       if (partner.strain === Strain.CLUBS || partner.strain === Strain.DIAMONDS) {
         const spLen = suitLength(c, Strain.SPADES);
         const hLen = suitLength(c, Strain.HEARTS);
-        if (hLen >= 4 && suitOrderIndex(Strain.HEARTS) > suitOrderIndex(partner.strain)) {
-          if (spLen >= 4 && hLen === spLen) return contractBid(1, Strain.HEARTS);
-          if (hLen > spLen) return contractBid(1, Strain.HEARTS);
-        }
-        if (spLen >= 4 && suitOrderIndex(Strain.SPADES) > suitOrderIndex(partner.strain)) {
-          return contractBid(1, Strain.SPADES);
-        }
-        if (hLen >= 4 && suitOrderIndex(Strain.HEARTS) > suitOrderIndex(partner.strain)) {
-          return contractBid(1, Strain.HEARTS);
-        }
+        if (hLen > spLen && hLen >= 4) return contractBid(1, Strain.HEARTS);
+        if (spLen > hLen && spLen >= 4) return contractBid(1, Strain.SPADES);
+        if (hLen >= 4) return contractBid(1, Strain.HEARTS);
+        if (spLen >= 4) return contractBid(1, Strain.SPADES);
         return contractBid(1, longestMajor(c));
       }
       return contractBid(1, longestMajor(c));
@@ -1228,14 +1225,14 @@ export const RULES = [
   {
     id: 'R23a-respond-1d-over-1c',
     priority: 123,
-    description: 'Respond 1D over partner 1C opening with 4+ diamonds and 6+ HCP',
+    description: 'Respond 1D over partner 1C opening with 4+ diamonds and 6-12 HCP',
     applies: c => isResponderFirstTurn(c) &&
       !!c.partnerBid &&
       c.partnerBid.level === 1 &&
       c.partnerBid.strain === Strain.CLUBS &&
       !c.opponentBid &&
       suitLength(c, Strain.DIAMONDS) >= 4 &&
-      c.evaluation.hcp >= 6 &&
+      c.evaluation.hcp >= 6 && c.evaluation.hcp <= 12 &&
       !hasFourCardMajor(c),
     propose: () => contractBid(1, Strain.DIAMONDS),
   },
@@ -1341,9 +1338,9 @@ export const RULES = [
     applies: c => isResponderFirstTurn(c) && partnerOpenedSuitAtOne(c) &&
       hasThreeCardSupportForPartner(c) &&
       c.evaluation.hcp >= 6 && c.evaluation.hcp <= 9 &&
+      !c.opponentBid &&
       !(isBalancedContext(c) && c.partnerBid &&
-        (c.partnerBid.strain === Strain.CLUBS || c.partnerBid.strain === Strain.DIAMONDS) &&
-        suitLength(c, c.partnerBid.strain) <= 3),
+        (c.partnerBid.strain === Strain.CLUBS || c.partnerBid.strain === Strain.DIAMONDS)),
     propose: c => contractBid(2, c.partnerBid ? c.partnerBid.strain : Strain.CLUBS),
   },
   {
@@ -1544,13 +1541,18 @@ export const RULES = [
   {
     id: 'R35-opener-rebid-jump-game-major',
     priority: 113,
-    description: 'Opener bids game with strong major fit',
+    description: 'Opener bids game with strong major fit after limit raise',
     applies: c => isOpenerRebid(c) &&
       !!c.partnerBid &&
       (c.partnerBid.strain === Strain.HEARTS || c.partnerBid.strain === Strain.SPADES) &&
+      c.partnerBid.level === 3 &&
       suitLength(c, c.partnerBid.strain) >= 4 &&
       c.evaluation.hcp >= 18,
-    propose: c => contractBid(4, c.partnerBid ? c.partnerBid.strain : Strain.SPADES),
+    propose: c => {
+      if (!c.partnerBid) return contractBid(4, Strain.SPADES);
+      if (c.evaluation.hcp >= 20) return contractBid(5, c.partnerBid.strain);
+      return contractBid(4, c.partnerBid.strain);
+    },
   },
   {
     id: 'R36-opener-rebid-2nt',
