@@ -307,6 +307,16 @@ function partnerOpenedSuitAtOne(context) {
  * @param {RuleContext} context
  * @returns {boolean}
  */
+function partnerOpenedMajorAtOne(context) {
+  return !!context.partnerBid &&
+    context.partnerBid.level === 1 &&
+    (context.partnerBid.strain === Strain.HEARTS || context.partnerBid.strain === Strain.SPADES);
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
 function isResponderFirstTurn(context) {
   return context.phase === 'responding' && context.ownBidCount === 0;
 }
@@ -325,6 +335,113 @@ function isOpenerRebid(context) {
  */
 function isResponderRebid(context) {
   return context.phase === 'rebid' && !context.opener && context.ownBidCount === 1 && !!context.partnerBid;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isOpenerRebidAfterOneSpadeTwoHearts(context) {
+  if (!isOpenerRebid(context) || !context.ownBid || !context.partnerBid) return false;
+  return context.ownBid.level === 1 &&
+    context.ownBid.strain === Strain.SPADES &&
+    context.partnerBid.level === 2 &&
+    context.partnerBid.strain === Strain.HEARTS;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isInterferenceAfterOneNtResponse(context) {
+  if (!isResponderRebid(context) || !context.ownBid || !context.partnerLastBid || !context.opponentBid) return false;
+  return context.partnerLastBid.level === 1 &&
+    context.partnerLastBid.strain === Strain.NOTRUMP &&
+    context.opponentBid.level >= 2;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isResponderRebidAfterOneSpadeTwoHeartsThreeDiamonds(context) {
+  if (!isResponderRebid(context) || !context.ownBid || !context.partnerLastBid) return false;
+  return context.ownBid.level === 2 &&
+    context.ownBid.strain === Strain.HEARTS &&
+    context.partnerLastBid.level === 3 &&
+    context.partnerLastBid.strain === Strain.DIAMONDS;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isResponderAfterOneSuitOpenPass(context) {
+  return isResponderFirstTurn(context) &&
+    !!context.partnerBid &&
+    !!context.opponentBid &&
+    context.opponentBid.level === context.partnerBid.level &&
+    context.opponentBid.strain === context.partnerBid.strain;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isCompetitiveAfterOneClubOpen(context) {
+  return context.phase === 'competitive' &&
+    !context.ownBid &&
+    !!context.opponentBid &&
+    context.opponentBid.level === 1 &&
+    context.opponentBid.strain === Strain.CLUBS;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isCompetitiveAfterOneDiamondOpen(context) {
+  return context.phase === 'competitive' &&
+    !context.ownBid &&
+    !!context.opponentBid &&
+    context.opponentBid.level === 1 &&
+    context.opponentBid.strain === Strain.DIAMONDS;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isResponderRebidAfterOneNotrumpTwoSpadesThreeClubs(context) {
+  if (!isResponderRebid(context) || !context.ownBid || !context.partnerLastBid) return false;
+  return context.ownBid.level === 2 &&
+    context.ownBid.strain === Strain.SPADES &&
+    context.partnerLastBid.level === 3 &&
+    context.partnerLastBid.strain === Strain.CLUBS;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isOpenerRebidAfterOneSpadeTwoSpadesThreeSpadesFourClubs(context) {
+  if (!isOpenerRebid(context) || !context.ownBid || !context.partnerLastBid) return false;
+  return context.ownBid.level === 1 &&
+    context.ownBid.strain === Strain.SPADES &&
+    context.partnerLastBid.level === 4 &&
+    context.partnerLastBid.strain === Strain.CLUBS;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isOpenerRebidAfterOneSpadeTwoSpadesTwoNotrump(context) {
+  if (!isOpenerRebid(context) || !context.ownBid || !context.partnerLastBid) return false;
+  return context.ownBid.level === 1 &&
+    context.ownBid.strain === Strain.SPADES &&
+    context.partnerLastBid.level === 2 &&
+    context.partnerLastBid.strain === Strain.NOTRUMP;
 }
 
 /**
@@ -506,6 +623,174 @@ function transferTarget(context) {
   if (context.ownBid.level === 2 && context.ownBid.strain === Strain.DIAMONDS) return Strain.HEARTS;
   if (context.ownBid.level === 2 && context.ownBid.strain === Strain.HEARTS) return Strain.SPADES;
   return null;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {number}
+ */
+function kingCount(context) {
+  let count = 0;
+  for (const card of context.hand.cards) {
+    if (card.rank === Rank.KING) count++;
+  }
+  return count;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function lastBidIsDouble(context) {
+  const bids = context.auction.bids;
+  if (bids.length === 0) return false;
+  return bids[bids.length - 1].type === 'double';
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isOneNtTransferDoubled(context) {
+  if (!isOpenerRebid(context) || !context.ownBid || !context.partnerBid) return false;
+  return context.ownBid.level === 1 &&
+    context.ownBid.strain === Strain.NOTRUMP &&
+    context.partnerBid.level === 2 &&
+    context.partnerBid.strain === Strain.HEARTS &&
+    lastBidIsDouble(context);
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isOneNtStaymanDoubled(context) {
+  if (!isOpenerRebid(context) || !context.ownBid || !context.partnerBid) return false;
+  return context.ownBid.level === 1 &&
+    context.ownBid.strain === Strain.NOTRUMP &&
+    context.partnerBid.level === 2 &&
+    context.partnerBid.strain === Strain.CLUBS &&
+    lastBidIsDouble(context);
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isOneNtDirectCappellettiAfterDoublePass(context) {
+  if (!isOpenerRebid(context) || !context.ownBid || !context.opponentBid) return false;
+  const bids = context.auction.bids;
+  if (bids.length < 4) return false;
+  return context.ownBid.level === 1 &&
+    context.ownBid.strain === Strain.NOTRUMP &&
+    context.opponentBid.level === 2 &&
+    context.opponentBid.strain === Strain.CLUBS &&
+    bids[bids.length - 1].type === 'pass' &&
+    bids[bids.length - 2].type === 'double';
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isOpenerAfterOneNtTwoClubsDoublePass(context) {
+  if (!isOpenerRebid(context) || !context.ownBid || !context.opponentBid) return false;
+  const bids = context.auction.bids;
+  if (bids.length < 4) return false;
+  return context.ownBid.level === 1 &&
+    context.ownBid.strain === Strain.NOTRUMP &&
+    context.opponentBid.level === 2 &&
+    context.opponentBid.strain === Strain.CLUBS &&
+    bids[bids.length - 1].type === 'pass' &&
+    bids[bids.length - 2].type === 'double';
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isOneNtStaymanOpenerContinuation(context) {
+  if (context.phase !== 'rebid' || !context.opener || !context.ownBid || !context.partnerBid || !context.ownLastBid) return false;
+  if (context.ownBidCount < 2) return false;
+  if (context.ownBid.level !== 1 || context.ownBid.strain !== Strain.NOTRUMP) return false;
+  if (context.partnerBid.level !== 2 || context.partnerBid.strain !== Strain.CLUBS) return false;
+  return context.ownLastBid.level === 2 &&
+    (context.ownLastBid.strain === Strain.DIAMONDS ||
+      context.ownLastBid.strain === Strain.HEARTS ||
+      context.ownLastBid.strain === Strain.SPADES);
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isOneNtGerberKingAsk(context) {
+  if (context.phase !== 'rebid' || !context.opener || !context.ownBid || !context.partnerBid || !context.partnerLastBid || !context.ownLastBid) return false;
+  if (context.ownBidCount < 2) return false;
+  return context.ownBid.level === 1 &&
+    context.ownBid.strain === Strain.NOTRUMP &&
+    context.partnerBid.level === 4 &&
+    context.partnerBid.strain === Strain.CLUBS &&
+    context.partnerLastBid.level === 5 &&
+    context.partnerLastBid.strain === Strain.CLUBS &&
+    context.ownLastBid.level === 4;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isOneMajorOpenerAfterFiveNt(context) {
+  if (!isOpenerRebid(context) || !context.ownBid || !context.partnerBid) return false;
+  return context.ownBid.level === 1 &&
+    (context.ownBid.strain === Strain.HEARTS || context.ownBid.strain === Strain.SPADES) &&
+    context.partnerBid.level === 5 &&
+    context.partnerBid.strain === Strain.NOTRUMP;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isOneNtStaymanOpenerAfterTwoNtInvite(context) {
+  if (!isOneNtStaymanOpenerContinuation(context) || !context.partnerLastBid) return false;
+  return context.partnerLastBid.level === 2 && context.partnerLastBid.strain === Strain.NOTRUMP;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isOneNtStaymanOpenerAfterThreeClubContinuation(context) {
+  if (!isOneNtStaymanOpenerContinuation(context) || !context.partnerLastBid) return false;
+  return context.partnerLastBid.level === 3 && context.partnerLastBid.strain === Strain.CLUBS;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isOneNtStaymanOpenerAfterThreeHeartsInvite(context) {
+  if (!isOneNtStaymanOpenerContinuation(context) || !context.partnerLastBid) return false;
+  return context.partnerLastBid.level === 3 && context.partnerLastBid.strain === Strain.HEARTS;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isOneNtStaymanOpenerAfterThreeNt(context) {
+  if (!isOneNtStaymanOpenerContinuation(context) || !context.partnerLastBid) return false;
+  return context.partnerLastBid.level === 3 && context.partnerLastBid.strain === Strain.NOTRUMP;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isOneNtStaymanOpenerAfterFiveNt(context) {
+  if (!isOneNtStaymanOpenerContinuation(context) || !context.partnerLastBid) return false;
+  return context.partnerLastBid.level === 5 && context.partnerLastBid.strain === Strain.NOTRUMP;
 }
 
 /**
@@ -830,6 +1115,36 @@ export const RULES = [
     propose: () => contractBid(1, Strain.NOTRUMP),
   },
   {
+    id: 'R24x-respond-pass-without-values-over-major',
+    priority: 121,
+    description: 'Pass with very weak hand and no fit over one-level major opening',
+    applies: c => isResponderFirstTurn(c) &&
+      partnerOpenedMajorAtOne(c) &&
+      c.evaluation.hcp <= 5 &&
+      (!c.partnerBid || suitLength(c, c.partnerBid.strain) < 3),
+    propose: () => pass(),
+  },
+  {
+    id: 'R24y-respond-2nt-over-major-balanced',
+    priority: 121,
+    description: 'Bid 2NT over one-level major opening with balanced invitational values',
+    applies: c => isResponderFirstTurn(c) &&
+      partnerOpenedMajorAtOne(c) &&
+      isSemiOrBalanced(c) &&
+      c.evaluation.hcp >= 10 && c.evaluation.hcp <= 12,
+    propose: () => contractBid(2, Strain.NOTRUMP),
+  },
+  {
+    id: 'R24z-respond-3nt-over-major-balanced',
+    priority: 121,
+    description: 'Bid 3NT over one-level major opening with balanced game values',
+    applies: c => isResponderFirstTurn(c) &&
+      partnerOpenedMajorAtOne(c) &&
+      isSemiOrBalanced(c) &&
+      c.evaluation.hcp >= 13,
+    propose: () => contractBid(3, Strain.NOTRUMP),
+  },
+  {
     id: 'R24a-respond-2nt-over-minor',
     priority: 121,
     description: 'Bid 2NT over minor opening with balanced invitational values and no fit',
@@ -837,8 +1152,7 @@ export const RULES = [
       partnerOpenedMinorAtOne(c) &&
       isSemiOrBalanced(c) &&
       c.evaluation.hcp >= 10 && c.evaluation.hcp <= 12 &&
-      !hasFourCardMajor(c) &&
-      (!c.partnerBid || suitLength(c, c.partnerBid.strain) < 4),
+      (!c.partnerBid || suitLength(c, c.partnerBid.strain) <= 4),
     propose: () => contractBid(2, Strain.NOTRUMP),
   },
   {
@@ -849,9 +1163,17 @@ export const RULES = [
       partnerOpenedMinorAtOne(c) &&
       isSemiOrBalanced(c) &&
       c.evaluation.hcp >= 13 &&
-      !hasFourCardMajor(c) &&
-      (!c.partnerBid || suitLength(c, c.partnerBid.strain) < 4),
+      (!c.partnerBid || suitLength(c, c.partnerBid.strain) <= 4),
     propose: () => contractBid(3, Strain.NOTRUMP),
+  },
+  {
+    id: 'R24d-respond-pass-without-values-over-minor',
+    priority: 120,
+    description: 'Pass with very weak values after partner one-level minor opening',
+    applies: c => isResponderFirstTurn(c) &&
+      partnerOpenedMinorAtOne(c) &&
+      c.evaluation.hcp <= 5,
+    propose: () => pass(),
   },
   {
     id: 'R24c-respond-weak-jump-to-major-game',
@@ -1060,6 +1382,141 @@ export const RULES = [
     },
   },
   {
+    id: 'R40x-responder-rebid-after-1nt-interference-redouble',
+    priority: 108,
+    description: 'After interference over responder relay, redouble with strong balanced values',
+    applies: c => isInterferenceAfterOneNtResponse(c) &&
+      isSemiOrBalanced(c) &&
+      c.evaluation.hcp >= 16 &&
+      !!c.opponentBid &&
+      c.opponentBid.type === 'contract',
+    propose: () => redbl(),
+  },
+  {
+    id: 'R40y-responder-rebid-after-1nt-interference-compete',
+    priority: 108,
+    description: 'After interference over responder relay, compete in longest major with values',
+    applies: c => isInterferenceAfterOneNtResponse(c) &&
+      c.evaluation.hcp >= 8 &&
+      hasFiveCardMajor(c),
+    propose: c => contractBid(2, longestMajor(c)),
+  },
+  {
+    id: 'R40z-responder-rebid-after-1nt-interference-pass',
+    priority: 107,
+    description: 'After interference over responder relay, pass with minimum hand',
+    applies: c => isInterferenceAfterOneNtResponse(c),
+    propose: () => pass(),
+  },
+  {
+    id: 'R40f-opener-complete-transfer-jump-after-double',
+    priority: 109,
+    description: 'After transfer is doubled, super-accept with four-card fit and maximum',
+    applies: c => isOneNtTransferDoubled(c) &&
+      suitLength(c, Strain.SPADES) >= 4 &&
+      c.evaluation.hcp >= 17,
+    propose: () => contractBid(3, Strain.SPADES),
+  },
+  {
+    id: 'R40g-opener-complete-transfer-after-double',
+    priority: 108,
+    description: 'After transfer is doubled, complete transfer with three-card support',
+    applies: c => isOneNtTransferDoubled(c) &&
+      suitLength(c, Strain.SPADES) >= 3,
+    propose: () => contractBid(2, Strain.SPADES),
+  },
+  {
+    id: 'R40h-opener-redouble-after-transfer-double',
+    priority: 108,
+    description: 'After transfer double, redouble with max values and strong hearts',
+    applies: c => isOneNtTransferDoubled(c) &&
+      c.evaluation.hcp >= 17 &&
+      suitLength(c, Strain.HEARTS) >= 5,
+    propose: () => redbl(),
+  },
+  {
+    id: 'R40i-opener-pass-after-transfer-double',
+    priority: 107,
+    description: 'After transfer double, pass with no clear action',
+    applies: c => isOneNtTransferDoubled(c),
+    propose: () => pass(),
+  },
+  {
+    id: 'R40j-opener-accept-stayman-2nt-with-spade-fit',
+    priority: 108,
+    description: 'After Stayman invite, show spade fit when available',
+    applies: c => isOneNtStaymanOpenerAfterTwoNtInvite(c) &&
+      !!c.ownLastBid &&
+      c.ownLastBid.strain === Strain.HEARTS &&
+      suitLength(c, Strain.SPADES) >= 4,
+    propose: () => contractBid(3, Strain.SPADES),
+  },
+  {
+    id: 'R40k-opener-accept-stayman-2nt-to-3nt',
+    priority: 107,
+    description: 'After Stayman invitational 2NT, bid 3NT with maximum',
+    applies: c => isOneNtStaymanOpenerAfterTwoNtInvite(c) &&
+      c.evaluation.hcp >= 17,
+    propose: () => contractBid(3, Strain.NOTRUMP),
+  },
+  {
+    id: 'R40l-opener-3nt-after-stayman-3c',
+    priority: 107,
+    description: 'After Stayman continuation to 3C, bid 3NT naturally',
+    applies: c => isOneNtStaymanOpenerAfterThreeClubContinuation(c),
+    propose: () => contractBid(3, Strain.NOTRUMP),
+  },
+  {
+    id: 'R40m-opener-pass-after-stayman-3nt',
+    priority: 106,
+    description: 'After partner signs off in 3NT via Stayman, pass',
+    applies: c => isOneNtStaymanOpenerAfterThreeNt(c),
+    propose: () => pass(),
+  },
+  {
+    id: 'R40n-opener-accept-stayman-3h-invite',
+    priority: 107,
+    description: 'After 3H invite via Stayman, bid game with maximum',
+    applies: c => isOneNtStaymanOpenerAfterThreeHeartsInvite(c) &&
+      c.evaluation.hcp >= 17,
+    propose: () => contractBid(4, Strain.HEARTS),
+  },
+  {
+    id: 'R40o-opener-pass-stayman-3h-invite',
+    priority: 106,
+    description: 'After 3H invite via Stayman, pass with minimum',
+    applies: c => isOneNtStaymanOpenerAfterThreeHeartsInvite(c),
+    propose: () => pass(),
+  },
+  {
+    id: 'R40p-opener-accept-5nt-after-stayman',
+    priority: 107,
+    description: 'After 5NT invite via Stayman sequence, accept to 6NT with maximum',
+    applies: c => isOneNtStaymanOpenerAfterFiveNt(c) &&
+      c.evaluation.hcp >= 17,
+    propose: () => contractBid(6, Strain.NOTRUMP),
+  },
+  {
+    id: 'R40q-opener-pass-5nt-after-stayman',
+    priority: 106,
+    description: 'After 5NT invite via Stayman sequence, pass with minimum',
+    applies: c => isOneNtStaymanOpenerAfterFiveNt(c),
+    propose: () => pass(),
+  },
+  {
+    id: 'R40r-opener-answer-gerber-king-ask',
+    priority: 108,
+    description: 'After Gerber king ask, show king count',
+    applies: c => isOneNtGerberKingAsk(c),
+    propose: c => {
+      const kings = kingCount(c);
+      if (kings === 1) return contractBid(5, Strain.HEARTS);
+      if (kings === 2) return contractBid(5, Strain.SPADES);
+      if (kings === 3) return contractBid(5, Strain.NOTRUMP);
+      return contractBid(5, Strain.DIAMONDS);
+    },
+  },
+  {
     id: 'R40a-opener-pass-after-stayman-interference',
     priority: 108,
     description: 'After Stayman is overcalled, pass with minimum and no penalty double',
@@ -1093,6 +1550,38 @@ export const RULES = [
     description: 'After partner quantitative 4NT, pass with minimum',
     applies: c => isOneNtOpenerAfterQuantitativeFourNt(c) && c.evaluation.hcp <= 15,
     propose: () => pass(),
+  },
+  {
+    id: 'R40ea-opener-redouble-after-stayman-double',
+    priority: 110,
+    description: 'After Stayman is doubled, redouble with stronger values and short clubs',
+    applies: c => isOneNtStaymanDoubled(c) &&
+      c.evaluation.hcp >= 16 &&
+      suitLength(c, Strain.CLUBS) <= 3,
+    propose: () => redbl(),
+  },
+  {
+    id: 'R40eb-opener-pass-after-stayman-double',
+    priority: 109,
+    description: 'After Stayman is doubled, pass without values for redouble',
+    applies: c => isOneNtStaymanDoubled(c),
+    propose: () => pass(),
+  },
+  {
+    id: 'R40ec-opener-pass-after-direct-cappelletti-double-pass',
+    priority: 108,
+    description: 'After direct 2C overcall and partner double, pass with short diamonds',
+    applies: c => isOneNtDirectCappellettiAfterDoublePass(c) &&
+      suitLength(c, Strain.DIAMONDS) <= 4,
+    propose: () => pass(),
+  },
+  {
+    id: 'R40ed-opener-2d-after-direct-cappelletti-double-pass',
+    priority: 107,
+    description: 'After direct 2C overcall and partner double, run to 2D with diamond length',
+    applies: c => isOneNtDirectCappellettiAfterDoublePass(c) &&
+      suitLength(c, Strain.DIAMONDS) >= 5,
+    propose: () => contractBid(2, Strain.DIAMONDS),
   },
   {
     id: 'R41-opener-accept-invite-after-1nt',
@@ -1186,6 +1675,23 @@ export const RULES = [
     description: 'Over minor limit raise, pass with minimum values',
     applies: c => responderMadeMinorLimitRaise(c) && c.evaluation.hcp <= 15,
     propose: () => pass(),
+  },
+  {
+    id: 'R42h-opener-rebid-3d-after-1s-2h',
+    priority: 104,
+    description: 'After 1S-2H, show diamond second suit at the three level',
+    applies: c => isOpenerRebidAfterOneSpadeTwoHearts(c) &&
+      suitLength(c, Strain.DIAMONDS) >= 4,
+    propose: () => contractBid(3, Strain.DIAMONDS),
+  },
+  {
+    id: 'R42i-opener-rebid-2s-after-1s-2h',
+    priority: 103,
+    description: 'After 1S-2H, rebid spades with six-card support structure',
+    applies: c => isOpenerRebidAfterOneSpadeTwoHearts(c) &&
+      !!c.ownBid &&
+      suitLength(c, c.ownBid.strain) >= 6,
+    propose: () => contractBid(2, Strain.SPADES),
   },
   {
     id: 'R43-jacoby-2nt-opener-shortness',
@@ -1343,8 +1849,7 @@ export const RULES = [
       c.partnerBid.strain === Strain.DIAMONDS &&
       isSemiOrBalanced(c) &&
       c.evaluation.hcp >= 10 && c.evaluation.hcp <= 12 &&
-      !hasFourCardMajor(c) &&
-      suitLength(c, Strain.DIAMONDS) <= 3,
+      suitLength(c, Strain.DIAMONDS) <= 4,
     propose: () => contractBid(2, Strain.NOTRUMP),
   },
   {
@@ -1357,23 +1862,32 @@ export const RULES = [
       c.partnerBid.strain === Strain.DIAMONDS &&
       isSemiOrBalanced(c) &&
       c.evaluation.hcp >= 13 &&
-      !hasFourCardMajor(c) &&
-      suitLength(c, Strain.DIAMONDS) <= 3,
+      suitLength(c, Strain.DIAMONDS) <= 4,
     propose: () => contractBid(3, Strain.NOTRUMP),
   },
   {
     id: 'R50d-responder-3nt-after-opener-3d',
     priority: 103,
     description: 'After 1S-2H-3D, bid 3NT with balanced invitational-plus values',
-    applies: c => isResponderRebid(c) &&
-      !!c.ownBid &&
-      !!c.partnerLastBid &&
-      c.ownBid.level === 2 &&
-      c.ownBid.strain === Strain.HEARTS &&
-      c.partnerLastBid.level === 3 &&
-      c.partnerLastBid.strain === Strain.DIAMONDS &&
+    applies: c => isResponderRebidAfterOneSpadeTwoHeartsThreeDiamonds(c) &&
       isSemiOrBalanced(c) &&
       c.evaluation.hcp >= 10,
     propose: () => contractBid(3, Strain.NOTRUMP),
+  },
+  {
+    id: 'R50e-responder-rebid-2s-after-opener-3d',
+    priority: 102,
+    description: 'After 1S-2H-3D, rebid spades with preference support',
+    applies: c => isResponderRebidAfterOneSpadeTwoHeartsThreeDiamonds(c) &&
+      !!c.partnerBid &&
+      suitLength(c, c.partnerBid.strain) >= 3,
+    propose: c => contractBid(2, c.partnerBid ? c.partnerBid.strain : Strain.SPADES),
+  },
+  {
+    id: 'R50f-responder-rebid-pass-after-opener-3d',
+    priority: 101,
+    description: 'After 1S-2H-3D, pass with weak non-fitting continuation values',
+    applies: c => isResponderRebidAfterOneSpadeTwoHeartsThreeDiamonds(c),
+    propose: () => pass(),
   },
 ];
