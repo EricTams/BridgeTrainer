@@ -38,7 +38,7 @@ const SHAPE_D = 2;
 const SHAPE_C = 3;
 
 const MIN_OPEN_HCP = 13;
-const RULE_20_MIN = 11;
+const RULE_20_MIN = 10;
 
 /** @type {ReadonlyArray<import('../model/bid.js').Strain>} */
 const SUIT_STRAINS = [Strain.SPADES, Strain.HEARTS, Strain.DIAMONDS, Strain.CLUBS];
@@ -1942,12 +1942,12 @@ export const RULES = [
   {
     id: 'R42a-opener-game-over-major-limit-raise',
     priority: 107,
-    description: 'Over major limit raise, bid game with maximum or distributional values',
+    description: 'Over major limit raise, bid game with values or extreme shape',
     applies: c => responderSignedOffMajorRaise(c) &&
       !!c.partnerBid &&
       c.partnerBid.level === 3 &&
       (c.evaluation.hcp >= 14 ||
-       (c.evaluation.hcp >= 13 && !isBalancedContext(c))),
+       (c.evaluation.hcp >= 13 && c.ownBid && suitLength(c, c.ownBid.strain) >= 7)),
     propose: c => contractBid(4, c.ownBid ? c.ownBid.strain : Strain.SPADES),
   },
   {

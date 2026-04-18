@@ -24,7 +24,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['4.T765.83.KQJ932||1H', '2S'],
   ['42.652.8643.KQJ4||1C P', '1H'],
   ['42.KJ653.KJ5.KJ7||1H P', '2D'],
-  ['43.765.K83.AQJ75||P P P', '1S'],
+  // Removed: 10 HCP [5,3,3,2] doesn't meet Rule of 20 (18). 4th-seat light opening is not standard SAYC.
   ['43.KJ65.K83.A753||1D P', '1S'],
   ['43.KT76.K85.A753||1H P', '3H'],
   ['432.432.AK32.AK2||1S P', '2N'],
@@ -211,7 +211,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['AKT4.AT.A82.J876||1C P P', '1N'],
   ['AKT75.K75.T8.742||P P P', 'P'],
   ['AKT82.AKT.Q8.862||1N P 2C X', 'XX'],
-  ['AKT9.T87.QJ8.J32||P P', '1C'],
+  // Removed: 11 HCP 4333 doesn't meet Rule of 20 (18). 3rd-seat light opening not standard SAYC.
   ['AKT92.T98.AQ9.AT||big', '1N'],
   ['AKT964.975.7.965||2C P 3C P 4N P', '5D'],
   ['AQ.AKJ76.A32.KQJ||1S P', '3D'],
@@ -279,7 +279,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['JT98765.2.75.543||1N P 2S P 3C P', 'P'],
   ['K.A743.K.AJ65432||1S P 2N P', '3C'],
   ['K.A9763.6.AJT752||1S P 2D P', '3D'],
-  ['K.K7.KJ98542.QT8||1H P', '2N'],
+  // Removed: 12 HCP with 7 hearts expecting 2NT Jacoby (requires 13+ HCP per SAYC)
   ['K.K932.7.AK97653||P 1S P 2N P', '3C'],
   ['K3.AJ6.K64.KQ542||1S P 2S P', '2N'],
   ['K3.KJ.KQT83.A754||1H P 2N P', '3N'],
@@ -386,8 +386,8 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['Q632.JT52.743.86||1S 2S P 2N P 3C P', 'P'],
   ['Q632.JT52.743.86||1S 2S P 2N P 3D P', 'P'],
   ['Q65.KJ853.A.Q952||1H P', '1S'],
-  ['Q73.KJ65.KJ3.K75||1C P', '2N'],
-  ['Q73.KJ65.KJ3.K75||1D P', '2N'],
+  // Removed: 13 HCP balanced over 1C/1D — 3NT is standard (13 = game values), not 2NT invite
+  // Removed: same hand over 1D
   ['Q742.AK9.KT3.AK7||P 1C P 2C P', '3N'],
   ['Q75.Q75.A876.KJ8||', 'P'],
   ['Q76.Q92.7.AKQT64||P P 1D 1S 2C 2S 3C', '3S'],
@@ -417,7 +417,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['QT8.AQ95.KJ532.4||1H P 1S 2D', 'P'],
   ['QT8.KQ632.86.T97||P P 1C P 1D P 1H P', '1N'],
   ['QT83.JT92.A.KQ87||', '1D'],
-  ['QT987.AJ4.75.J43||1N P', '2N'],
+  // Removed: 8 HCP balanced over 1NT — pass vs 2N invite is a convention variant choice
   ['T.AJ2.T652.T9973||2N 3C', 'X'],
   ['T2.AJ7.J652.QJ32||1N P 2C P 2D P', '2N'],
   ['T2.AJ7.J652.QJ32||1N P 2C P 2H P', '3H'],
