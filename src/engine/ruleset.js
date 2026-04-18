@@ -364,8 +364,10 @@ function isInterferenceAfterOneNtResponse(context) {
  * @returns {boolean}
  */
 function isResponderRebidAfterOneSpadeTwoHeartsThreeDiamonds(context) {
-  if (!isResponderRebid(context) || !context.ownBid || !context.partnerLastBid) return false;
-  return context.ownBid.level === 2 &&
+  if (!isResponderRebid(context) || !context.ownBid || !context.partnerBid || !context.partnerLastBid) return false;
+  return context.partnerBid.level === 1 &&
+    context.partnerBid.strain === Strain.SPADES &&
+    context.ownBid.level === 2 &&
     context.ownBid.strain === Strain.HEARTS &&
     context.partnerLastBid.level === 3 &&
     context.partnerLastBid.strain === Strain.DIAMONDS;
@@ -1427,13 +1429,18 @@ export const RULES = [
   {
     id: 'R34-opener-rebid-new-suit',
     priority: 114,
-    description: 'Opener shows second suit with 4+ cards',
+    description: 'Opener shows second suit with 4+ cards (no reverse without 17+)',
     applies: c => isOpenerRebid(c) &&
+      !!c.ownBid &&
       !!c.partnerBid &&
-      c.partnerBid.strain !== c.ownBid?.strain &&
+      c.partnerBid.strain !== c.ownBid.strain &&
+      !c.opponentBid &&
       !(isSemiOrBalanced(c) && c.evaluation.hcp >= 18) &&
       !(isSemiOrBalanced(c) && c.evaluation.hcp >= 12 && c.evaluation.hcp <= 14 && !canShowOneLevelSuit(c)) &&
-      SUIT_STRAINS.some(s => c.ownBid && s !== c.ownBid.strain && suitLength(c, s) >= 4),
+      SUIT_STRAINS.some(s => s !== c.ownBid.strain && suitLength(c, s) >= 4 &&
+        (suitOrderIndex(s) > suitOrderIndex(c.partnerBid.strain) ||
+         suitOrderIndex(s) <= suitOrderIndex(c.ownBid.strain) ||
+         c.evaluation.hcp >= 17)),
     propose: c => {
       if (!c.ownBid || !c.partnerBid) return contractBid(2, longestSuit(c));
       const ownStrain = c.ownBid.strain;
@@ -1474,7 +1481,7 @@ export const RULES = [
     priority: 112,
     description: 'Opener rebids 2NT with invitational balanced strength',
     applies: c => isOpenerRebid(c) &&
-      c.evaluation.hcp >= 18 && c.evaluation.hcp <= 19 &&
+      c.evaluation.hcp >= 18 && c.evaluation.hcp <= 18 &&
       isBalancedContext(c),
     propose: () => contractBid(2, Strain.NOTRUMP),
   },
@@ -1553,8 +1560,8 @@ export const RULES = [
       const shown = c.partnerLastBid.strain;
       if (shown === Strain.HEARTS && suitLength(c, Strain.HEARTS) >= 4) return contractBid(3, Strain.HEARTS);
       if (shown === Strain.SPADES && suitLength(c, Strain.SPADES) >= 4) return contractBid(3, Strain.SPADES);
-      if (shown === Strain.DIAMONDS && (suitLength(c, Strain.SPADES) >= 4 || suitLength(c, Strain.HEARTS) >= 4)) {
-        return contractBid(2, longestMajor(c));
+      if (shown === Strain.DIAMONDS) {
+        return contractBid(2, Strain.NOTRUMP);
       }
       return contractBid(2, Strain.NOTRUMP);
     },
@@ -1576,20 +1583,19 @@ export const RULES = [
       if (!target) return pass();
       const len = suitLength(c, target);
       const hcp = c.evaluation.hcp;
-      if (hcp <= 7 && len <= 5 && hasFiveCardSuitBesidesTarget(c, target)) {
+      if (hcp <= 7 && len <= 5) return pass();
+      if (hcp <= 5 && len >= 6) return pass();
+      if (hcp >= 6 && hcp <= 7 && len <= 5 && hasFiveCardSuitBesidesTarget(c, target)) {
         const secondSuit = longestSuitExcluding(c, target);
         const bid = lowestLegalContractForStrain(c, secondSuit);
         if (bid) return bid;
       }
-      if (hcp <= 5 && len >= 6) return pass();
-      if (hcp <= 7 && len <= 5) return pass();
       if (hcp <= 7 && len >= 6) return contractBid(3, target);
       if (hcp >= 8 && hcp <= 9 && len >= 6) return contractBid(4, target);
       if (hcp >= 8 && hcp <= 9) return contractBid(2, Strain.NOTRUMP);
       if (len >= 6 && hcp >= 10) return contractBid(4, target);
       if (hcp >= 10 && hasFiveCardSuitBesidesTarget(c, target)) {
-        const secondSuit = longestSuitExcluding(c, target);
-        return contractBid(3, secondSuit);
+        return contractBid(4, target);
       }
       if (hcp >= 10) return contractBid(3, Strain.NOTRUMP);
       return contractBid(3, Strain.NOTRUMP);
@@ -1854,6 +1860,7 @@ export const RULES = [
       !!c.partnerBid &&
       c.partnerBid.level === 3 &&
       (c.evaluation.hcp >= 14 ||
+       (c.evaluation.hcp >= 11 && SUIT_STRAINS.some(s => suitLength(c, s) === 0)) ||
        (c.evaluation.hcp >= 13 && c.ownBid && suitLength(c, c.ownBid.strain) >= 7)),
     propose: c => contractBid(4, c.ownBid ? c.ownBid.strain : Strain.SPADES),
   },
@@ -1882,14 +1889,13 @@ export const RULES = [
   {
     id: 'R42c-opener-invite-over-major-simple-raise',
     priority: 106,
-    description: 'Over major single raise, invite with 2NT or trial bid',
+    description: 'Over major single raise, invite with trial bid, 2NT, or 3-trump',
     applies: c => responderSignedOffMajorRaise(c) &&
       !!c.partnerBid &&
       c.partnerBid.level === 2 &&
       c.evaluation.hcp >= 16 && c.evaluation.hcp <= 17,
     propose: c => {
       if (!c.ownBid) return pass();
-      if (isSemiOrBalanced(c)) return contractBid(2, Strain.NOTRUMP);
       if (suitLength(c, c.ownBid.strain) >= 6) return contractBid(3, c.ownBid.strain);
       for (const s of SUIT_STRAINS) {
         if (s === c.ownBid.strain) continue;
@@ -1898,19 +1904,19 @@ export const RULES = [
           if (bid && bid.level <= 3) return bid;
         }
       }
+      if (isBalancedContext(c)) return contractBid(2, Strain.NOTRUMP);
       return contractBid(3, c.ownBid.strain);
     },
   },
   {
     id: 'R42d0-opener-trial-bid-over-simple-raise',
-    priority: 106,
-    description: 'Over major simple raise, make trial bid showing side suit',
+    priority: 107,
+    description: 'Over major simple raise, show second suit with extras',
     applies: c => responderSignedOffMajorRaise(c) &&
       !!c.ownBid &&
       !!c.partnerBid &&
       c.partnerBid.level === 2 &&
-      c.evaluation.hcp >= 18 && c.evaluation.hcp <= 19 &&
-      !isSemiOrBalanced(c) &&
+      c.evaluation.hcp >= 18 &&
       SUIT_STRAINS.some(s => s !== c.ownBid.strain && suitLength(c, s) >= 4),
     propose: c => {
       if (!c.ownBid) return contractBid(4, Strain.SPADES);
