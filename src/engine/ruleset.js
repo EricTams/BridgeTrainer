@@ -1113,6 +1113,10 @@ export const RULES = [
       if (partner.strain === Strain.CLUBS || partner.strain === Strain.DIAMONDS) {
         const spLen = suitLength(c, Strain.SPADES);
         const hLen = suitLength(c, Strain.HEARTS);
+        if (partner.strain === Strain.CLUBS && spLen === 4 && hLen < 4 &&
+            suitLength(c, Strain.DIAMONDS) >= 4) {
+          return contractBid(1, Strain.DIAMONDS);
+        }
         if (hLen > spLen && hLen >= 4) return contractBid(1, Strain.HEARTS);
         if (spLen > hLen && spLen >= 4) return contractBid(1, Strain.SPADES);
         if (hLen >= 4) return contractBid(1, Strain.HEARTS);
@@ -1292,18 +1296,21 @@ export const RULES = [
   },
   {
     id: 'R28a-respond-jump-shift-strong',
-    priority: 121,
-    description: 'Jump shift response with 19+ and long suit',
+    priority: 124,
+    description: 'Jump shift response with 16+ and 5+ suit over minor opening',
     applies: c => isResponderFirstTurn(c) && partnerOpenedSuitAtOne(c) &&
-      c.evaluation.hcp >= 19 &&
-      SUIT_STRAINS.some(s => s !== (c.partnerBid ? c.partnerBid.strain : null) && suitLength(c, s) >= 5),
+      c.evaluation.hcp >= 16 &&
+      !c.opponentBid &&
+      !!c.partnerBid &&
+      (c.partnerBid.strain === Strain.CLUBS || c.partnerBid.strain === Strain.DIAMONDS) &&
+      SUIT_STRAINS.some(s => s !== c.partnerBid.strain && suitLength(c, s) >= 5),
     propose: c => {
       const partner = c.partnerBid;
-      if (!partner) return contractBid(3, longestSuit(c));
+      if (!partner) return contractBid(2, longestSuit(c));
       for (const s of suitsByLength(c, partner.strain, 5)) {
-        return contractBid(3, s);
+        return contractBid(2, s);
       }
-      return contractBid(3, longestSuit(c));
+      return contractBid(2, longestSuit(c));
     },
   },
   {
