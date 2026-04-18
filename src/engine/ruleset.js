@@ -401,6 +401,18 @@ function isResponderAfterOneSuitOpenPass(context) {
  * @param {RuleContext} context
  * @returns {boolean}
  */
+/**
+ * @param {RuleContext} context
+ * @returns {number}
+ */
+function aceCount(context) {
+  let count = 0;
+  for (const card of context.hand.cards) {
+    if (card.rank === Rank.ACE) count++;
+  }
+  return count;
+}
+
 function hasFiveCardMinor(context) {
   return suitLength(context, Strain.CLUBS) >= 5 || suitLength(context, Strain.DIAMONDS) >= 5;
 }
@@ -1505,6 +1517,10 @@ export const RULES = [
     priority: 114,
     description: 'Opener shows second suit with 4+ cards',
     applies: c => isOpenerRebid(c) &&
+      !!c.partnerBid &&
+      c.partnerBid.strain !== c.ownBid?.strain &&
+      !(isSemiOrBalanced(c) && c.evaluation.hcp >= 18) &&
+      !(isSemiOrBalanced(c) && c.evaluation.hcp >= 12 && c.evaluation.hcp <= 14 && !canShowOneLevelSuit(c)) &&
       SUIT_STRAINS.some(s => c.ownBid && s !== c.ownBid.strain && suitLength(c, s) >= 4),
     propose: c => {
       if (!c.ownBid || !c.partnerBid) return contractBid(2, longestSuit(c));
@@ -2092,16 +2108,38 @@ export const RULES = [
       const longestLen = suitLength(c, longest);
       const partnerOpened2C = !!c.partnerBid &&
         c.partnerBid.level === 2 && c.partnerBid.strain === Strain.CLUBS;
+      if (partnerOpened2C && c.partnerLastBid && c.partnerLastBid.level === 3 &&
+          c.partnerLastBid.strain === Strain.NOTRUMP) {
+        if (longestLen >= 5) {
+          return contractBid(4, longest);
+        }
+        if (c.evaluation.hcp >= 3) return contractBid(4, Strain.NOTRUMP);
+        return pass();
+      }
+      if (partnerOpened2C && c.partnerLastBid && c.partnerLastBid.level === 2 &&
+          c.partnerLastBid.strain === Strain.NOTRUMP) {
+        if (longestLen >= 5) {
+          const bid = lowestLegalContractForStrain(c, longest);
+          if (bid) return bid;
+        }
+        if (c.evaluation.hcp >= 3) return contractBid(3, Strain.CLUBS);
+        return pass();
+      }
       if (partnerOpened2C && longestLen >= 5) {
         const bid = lowestLegalContractForStrain(c, longest);
         if (bid) return bid;
       }
-      if (partnerOpened2C && c.partnerLastBid && c.partnerLastBid.level === 4 &&
+      if (c.partnerLastBid && c.partnerLastBid.level === 4 &&
           c.partnerLastBid.strain === Strain.NOTRUMP) {
-        for (const s of SUIT_STRAINS) {
-          if (suitLength(c, s) >= 5) return contractBid(5, s);
-        }
-        return contractBid(5, Strain.CLUBS);
+        const aces = aceCount(c);
+        if (aces === 0 || aces === 4) return contractBid(5, Strain.CLUBS);
+        if (aces === 1) return contractBid(5, Strain.DIAMONDS);
+        if (aces === 2) return contractBid(5, Strain.HEARTS);
+        return contractBid(5, Strain.SPADES);
+      }
+      if (longestLen >= 7 && c.evaluation.hcp >= 10 &&
+          (longest === Strain.HEARTS || longest === Strain.SPADES)) {
+        return contractBid(4, longest);
       }
       if (longestLen >= 6 && c.evaluation.hcp >= 10) {
         const bid = lowestLegalContractForStrain(c, longest, 3);
