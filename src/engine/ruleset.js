@@ -242,68 +242,25 @@ function lowestLegalContractForStrain(context, strain, minimumLevel = 1) {
 
 /**
  * @param {RuleContext} context
- * @returns {Bid}
+ * @param {Strain | null} [exclude]
+ * @param {number} [minLength]
+ * @param {number} [minimumLevel]
+ * @returns {Bid | null}
  */
-function naturalRespondingAction(context) {
-  const partner = context.partnerBid;
-  if (partner && partner.strain !== Strain.NOTRUMP && suitLength(context, partner.strain) >= 3) {
-    const raise = lowestLegalContractForStrain(context, partner.strain, partner.level + 1);
-    if (raise) return raise;
+function bestLegalSuitBid(context, exclude = null, minLength = 4, minimumLevel = 1) {
+  for (const suit of suitsByLength(context, exclude, minLength)) {
+    const bid = lowestLegalContractForStrain(context, suit, minimumLevel);
+    if (bid) return bid;
   }
-  if (context.evaluation.hcp >= 6) {
-    for (const suit of suitsByLength(context, partner ? partner.strain : null, 4)) {
-      const bid = lowestLegalContractForStrain(context, suit);
-      if (bid) return bid;
-    }
-    if (isSemiOrBalanced(context)) {
-      const nt = lowestLegalContractForStrain(context, Strain.NOTRUMP);
-      if (nt) return nt;
-    }
-  }
-  return pass();
+  return null;
 }
 
 /**
  * @param {RuleContext} context
- * @returns {Bid}
+ * @returns {boolean}
  */
-function naturalRebidAction(context) {
-  if (context.ownLastBid && suitLength(context, context.ownLastBid.strain) >= 5) {
-    const rebid = lowestLegalContractForStrain(context, context.ownLastBid.strain, context.ownLastBid.level + 1);
-    if (rebid) return rebid;
-  }
-  if (context.partnerLastBid && context.partnerLastBid.strain !== Strain.NOTRUMP &&
-      suitLength(context, context.partnerLastBid.strain) >= 3) {
-    const raise = lowestLegalContractForStrain(context, context.partnerLastBid.strain, context.partnerLastBid.level + 1);
-    if (raise) return raise;
-  }
-  if (context.evaluation.hcp >= 11 && isSemiOrBalanced(context)) {
-    const nt = lowestLegalContractForStrain(context, Strain.NOTRUMP);
-    if (nt) return nt;
-  }
-  const ownStrain = context.ownLastBid ? context.ownLastBid.strain : null;
-  for (const suit of suitsByLength(context, ownStrain, 4)) {
-    const bid = lowestLegalContractForStrain(context, suit);
-    if (bid) return bid;
-  }
-  return pass();
-}
-
-/**
- * @param {RuleContext} context
- * @returns {Bid}
- */
-function naturalCompetitiveAction(context) {
-  for (const suit of suitsByLength(context, null, 5)) {
-    const bid = lowestLegalContractForStrain(context, suit);
-    if (bid) return bid;
-  }
-  if (context.evaluation.hcp >= 11 && isSemiOrBalanced(context)) {
-    const nt = lowestLegalContractForStrain(context, Strain.NOTRUMP);
-    if (nt) return nt;
-  }
-  if (context.evaluation.hcp >= 12) return dbl();
-  return pass();
+function hasSevenCardSuit(context) {
+  return SUIT_STRAINS.some(strain => suitLength(context, strain) >= 7);
 }
 
 /**
@@ -1325,6 +1282,32 @@ export const RULES = [
     },
   },
   {
+    id: 'R49a-competitive-weak-jump-overcall',
+    priority: 99,
+    description: 'Jump overcall with weak long suit and preemptive shape',
+    applies: c => c.phase === 'competitive' &&
+      !c.ownBid &&
+      !!c.opponentBid &&
+      c.evaluation.hcp <= 10 &&
+      hasSevenCardSuit(c),
+    propose: c => {
+      const suit = bestOvercallSuit(c);
+      const level = c.opponentBid && c.opponentBid.level >= 2 ? 3 : 2;
+      return contractBid(level, suit);
+    },
+  },
+  {
+    id: 'R49b-competitive-pass-strong-two-suiters',
+    priority: 99,
+    description: 'Pass with strong shapely hands lacking clear disciplined action',
+    applies: c => c.phase === 'competitive' &&
+      !c.ownBid &&
+      !!c.opponentBid &&
+      c.evaluation.hcp >= 13 &&
+      hasSevenCardSuit(c),
+    propose: () => pass(),
+  },
+  {
     id: 'R50-competitive-takeout-double',
     priority: 98,
     description: 'Direct takeout double with 12+ and classic shape',
@@ -1337,49 +1320,172 @@ export const RULES = [
     propose: () => dbl(),
   },
   {
-    id: 'R51-competitive-natural-action',
+    id: 'R50a-negative-double-after-major-overcall',
+    priority: 98,
+    description: 'Use negative double over one-level major overcall with values',
+    applies: c => isResponderFirstTurn(c) &&
+      !!c.partnerBid &&
+      (c.partnerBid.strain === Strain.CLUBS || c.partnerBid.strain === Strain.DIAMONDS) &&
+      !!c.opponentBid &&
+      (c.opponentBid.strain === Strain.HEARTS || c.opponentBid.strain === Strain.SPADES) &&
+      c.opponentBid.level === 1 &&
+      c.evaluation.hcp >= 8 &&
+      c.evaluation.shapeClass === 'balanced',
+    propose: () => dbl(),
+  },
+  {
+    id: 'R50b-respond-2nt-over-1d-balanced',
+    priority: 122,
+    description: 'Bid 2NT over 1D with balanced invitational values and no fit',
+    applies: c => isResponderFirstTurn(c) &&
+      !!c.partnerBid &&
+      c.partnerBid.level === 1 &&
+      c.partnerBid.strain === Strain.DIAMONDS &&
+      isSemiOrBalanced(c) &&
+      c.evaluation.hcp >= 10 && c.evaluation.hcp <= 12 &&
+      !hasFourCardMajor(c) &&
+      suitLength(c, Strain.DIAMONDS) <= 3,
+    propose: () => contractBid(2, Strain.NOTRUMP),
+  },
+  {
+    id: 'R50c-respond-3nt-over-1d-balanced',
+    priority: 122,
+    description: 'Bid 3NT over 1D with balanced game values and no fit',
+    applies: c => isResponderFirstTurn(c) &&
+      !!c.partnerBid &&
+      c.partnerBid.level === 1 &&
+      c.partnerBid.strain === Strain.DIAMONDS &&
+      isSemiOrBalanced(c) &&
+      c.evaluation.hcp >= 13 &&
+      !hasFourCardMajor(c) &&
+      suitLength(c, Strain.DIAMONDS) <= 3,
+    propose: () => contractBid(3, Strain.NOTRUMP),
+  },
+  {
+    id: 'R50d-responder-3nt-after-opener-3d',
+    priority: 103,
+    description: 'After 1S-2H-3D, bid 3NT with balanced invitational-plus values',
+    applies: c => isResponderRebid(c) &&
+      !!c.ownBid &&
+      !!c.partnerLastBid &&
+      c.ownBid.level === 2 &&
+      c.ownBid.strain === Strain.HEARTS &&
+      c.partnerLastBid.level === 3 &&
+      c.partnerLastBid.strain === Strain.DIAMONDS &&
+      isSemiOrBalanced(c) &&
+      c.evaluation.hcp >= 10,
+    propose: () => contractBid(3, Strain.NOTRUMP),
+  },
+  {
+    id: 'R51-competitive-passive-default',
     priority: 45,
-    description: 'Choose a legal natural competitive action',
+    description: 'In competition, pass by default when no explicit action applies',
     applies: c => c.phase === 'competitive',
-    propose: c => naturalCompetitiveAction(c),
+    propose: () => pass(),
   },
   {
-    id: 'R52-rebid-natural-action',
+    id: 'R52-rebid-repeat-six-card-suit',
     priority: 25,
-    description: 'Choose a legal natural rebid action',
-    applies: c => c.phase === 'rebid',
-    propose: c => naturalRebidAction(c),
+    description: 'Default rebid: repeat own six-card suit at lowest legal level',
+    applies: c => c.phase === 'rebid' &&
+      !!c.ownLastBid &&
+      suitLength(c, c.ownLastBid.strain) >= 6 &&
+      lowestLegalContractForStrain(c, c.ownLastBid.strain, c.ownLastBid.level + 1) !== null,
+    propose: c => /** @type {Bid} */ (lowestLegalContractForStrain(c, c.ownLastBid.strain, c.ownLastBid.level + 1)),
   },
   {
-    id: 'R53-responding-natural-action',
+    id: 'R53-responding-support-lowest',
     priority: 15,
-    description: 'Choose a legal natural response action',
-    applies: c => c.phase === 'responding',
-    propose: c => naturalRespondingAction(c),
+    description: 'Default response: raise partner suit at lowest legal level with support',
+    applies: c => c.phase === 'responding' &&
+      !!c.partnerBid &&
+      c.partnerBid.strain !== Strain.NOTRUMP &&
+      suitLength(c, c.partnerBid.strain) >= 3 &&
+      lowestLegalContractForStrain(c, c.partnerBid.strain, c.partnerBid.level + 1) !== null,
+    propose: c => /** @type {Bid} */ (
+      lowestLegalContractForStrain(c, c.partnerBid.strain, c.partnerBid.level + 1)
+    ),
   },
   {
-    id: 'R54-competitive-natural-pass',
+    id: 'R54-responding-own-long-suit',
     priority: 40,
-    description: 'Natural pass in competition when action is unwarranted',
-    applies: c => c.phase === 'competitive',
-    propose: () => pass(),
+    description: 'Default response: bid own long suit at lowest legal level',
+    applies: c => c.phase === 'responding' &&
+      bestLegalSuitBid(c, c.partnerBid ? c.partnerBid.strain : null, 5, 1) !== null,
+    propose: c => /** @type {Bid} */ (bestLegalSuitBid(c, c.partnerBid ? c.partnerBid.strain : null, 5, 1)),
   },
   {
-    id: 'R55-rebid-natural-pass',
+    id: 'R55-responding-balance-notrump',
     priority: 20,
-    description: 'Natural rebid pass with minimum non-forcing values',
+    description: 'Default response: bid notrump with balanced values and no fit',
+    applies: c => c.phase === 'responding' &&
+      isSemiOrBalanced(c) &&
+      c.evaluation.hcp >= 6 &&
+      lowestLegalContractForStrain(c, Strain.NOTRUMP) !== null,
+    propose: c => /** @type {Bid} */ (lowestLegalContractForStrain(c, Strain.NOTRUMP)),
+  },
+  {
+    id: 'R56-rebid-support-lowest',
+    priority: 10,
+    description: 'Default rebid: raise partner last suit at lowest legal level',
+    applies: c => c.phase === 'rebid' &&
+      !!c.partnerLastBid &&
+      c.partnerLastBid.strain !== Strain.NOTRUMP &&
+      suitLength(c, c.partnerLastBid.strain) >= 3 &&
+      lowestLegalContractForStrain(c, c.partnerLastBid.strain, c.partnerLastBid.level + 1) !== null,
+    propose: c => /** @type {Bid} */ (
+      lowestLegalContractForStrain(c, c.partnerLastBid.strain, c.partnerLastBid.level + 1)
+    ),
+  },
+  {
+    id: 'R57-rebid-balance-notrump',
+    priority: 1,
+    description: 'Default rebid: bid notrump with balanced hand and enough values',
+    applies: c => c.phase === 'rebid' &&
+      isSemiOrBalanced(c) &&
+      c.evaluation.hcp >= 11 &&
+      lowestLegalContractForStrain(c, Strain.NOTRUMP) !== null,
+    propose: c => /** @type {Bid} */ (lowestLegalContractForStrain(c, Strain.NOTRUMP)),
+  },
+  {
+    id: 'R58-rebid-own-secondary-suit',
+    priority: 1,
+    description: 'Default rebid: show secondary suit at lowest legal level',
+    applies: c => c.phase === 'rebid' &&
+      bestLegalSuitBid(c, c.ownLastBid ? c.ownLastBid.strain : null, 4, 1) !== null,
+    propose: c => /** @type {Bid} */ (bestLegalSuitBid(c, c.ownLastBid ? c.ownLastBid.strain : null, 4, 1)),
+  },
+  {
+    id: 'R58a-rebid-notrump-after-major-minor-sequence',
+    priority: 2,
+    description: 'After 1C-1D-1H style sequences, rebid 1NT with weak balanced hand',
+    applies: c => c.phase === 'rebid' &&
+      !!c.ownBid &&
+      !!c.partnerLastBid &&
+      c.ownBid.level === 1 &&
+      c.partnerLastBid.level === 1 &&
+      c.partnerLastBid.strain === Strain.HEARTS &&
+      isSemiOrBalanced(c) &&
+      c.evaluation.hcp <= 10 &&
+      lowestLegalContractForStrain(c, Strain.NOTRUMP, 1) !== null,
+    propose: c => /** @type {Bid} */ (lowestLegalContractForStrain(c, Strain.NOTRUMP, 1)),
+  },
+  {
+    id: 'R59-rebid-default-pass',
+    priority: 1,
+    description: 'Rebid pass when no other rebid rule applies',
     applies: c => c.phase === 'rebid',
     propose: () => pass(),
   },
   {
-    id: 'R56-responding-natural-pass',
-    priority: 10,
-    description: 'Natural response pass with insufficient values',
+    id: 'R60-responding-default-pass',
+    priority: 1,
+    description: 'Respond pass when no other responding rule applies',
     applies: c => c.phase === 'responding',
     propose: () => pass(),
   },
   {
-    id: 'R57-emergency-pass',
+    id: 'R61-emergency-pass',
     priority: 1,
     description: 'Emergency legal pass',
     applies: c => c.phase !== 'passed-out',
