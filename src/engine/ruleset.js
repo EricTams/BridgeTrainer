@@ -1250,8 +1250,9 @@ export const RULES = [
     description: 'Bid 3NT over one-level major opening with balanced game values',
     applies: c => isResponderFirstTurn(c) &&
       partnerOpenedMajorAtOne(c) &&
-      isSemiOrBalanced(c) &&
-      c.evaluation.hcp >= 13,
+      !c.opponentBid &&
+      isBalancedContext(c) &&
+      c.evaluation.hcp >= 15 && c.evaluation.hcp <= 17,
     propose: () => contractBid(3, Strain.NOTRUMP),
   },
   {
@@ -1260,10 +1261,11 @@ export const RULES = [
     description: 'Bid 2NT over minor opening with balanced invitational values and no fit',
     applies: c => isResponderFirstTurn(c) &&
       partnerOpenedMinorAtOne(c) &&
+      !c.opponentBid &&
       isBalancedContext(c) &&
-      c.evaluation.hcp >= 11 && c.evaluation.hcp <= 12 &&
+      c.evaluation.hcp === 12 &&
       !hasFourCardMajor(c) &&
-      (!c.partnerBid || suitLength(c, c.partnerBid.strain) <= 4),
+      (!c.partnerBid || suitLength(c, c.partnerBid.strain) <= 3),
     propose: () => contractBid(2, Strain.NOTRUMP),
   },
   {
@@ -1331,6 +1333,34 @@ export const RULES = [
       hasFourCardSupportForPartner(c) &&
       c.evaluation.hcp >= 13,
     propose: () => contractBid(2, Strain.NOTRUMP),
+  },
+  {
+    id: 'R28a-respond-jump-shift-strong',
+    priority: 121,
+    description: 'Jump shift response with 19+ and long suit',
+    applies: c => isResponderFirstTurn(c) && partnerOpenedSuitAtOne(c) &&
+      c.evaluation.hcp >= 19 &&
+      SUIT_STRAINS.some(s => s !== (c.partnerBid ? c.partnerBid.strain : null) && suitLength(c, s) >= 5),
+    propose: c => {
+      const partner = c.partnerBid;
+      if (!partner) return contractBid(3, longestSuit(c));
+      for (const s of suitsByLength(c, partner.strain, 5)) {
+        return contractBid(3, s);
+      }
+      return contractBid(3, longestSuit(c));
+    },
+  },
+  {
+    id: 'R28b-respond-jump-raise-minor-game',
+    priority: 120,
+    description: 'Jump raise partner minor to game with strong support',
+    applies: c => isResponderFirstTurn(c) && partnerOpenedSuitAtOne(c) &&
+      !!c.partnerBid &&
+      (c.partnerBid.strain === Strain.CLUBS || c.partnerBid.strain === Strain.DIAMONDS) &&
+      suitLength(c, c.partnerBid.strain) >= 5 &&
+      c.evaluation.hcp >= 13,
+    propose: c => contractBid(c.partnerBid ? (c.evaluation.hcp >= 14 ? 5 : 4) : 3,
+      c.partnerBid ? c.partnerBid.strain : Strain.CLUBS),
   },
   {
     id: 'R28-respond-new-suit-two-level',
