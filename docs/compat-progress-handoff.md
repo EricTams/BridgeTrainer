@@ -6,10 +6,10 @@
 - Inherited suite status (with compatibility override enabled):
   - `node run-inherited-suite.mjs` -> **Passed 447, Failed 0**
 - Override-disabled accuracy:
-  - **287 / 447** correct (64%)
-  - **160 / 447** wrong answer
+  - **305 / 447** correct (68%)
+  - **142 / 447** wrong answer
   - **0 / 447** no-recommendation
-  - Previous baselines: 228 correct (51%) -> 287 correct (64%)
+  - Previous baselines: 228 correct (51%) -> 287 (64%) -> 305 (68%)
   - No-rec progression: 144 -> 119 -> 1 -> 0
 
 ## What was completed
@@ -36,11 +36,12 @@
 | Rule | Cases | Pattern |
 |------|-------|---------|
 | R65 (rebid pass default) | 13 | Various opener/responder rebid gaps |
-| R46 (responder rebid after opener NT) | 9 | 2C response continuations, Blackwood |
-| R23 (respond new suit major) | 8 | Suit selection with equal-length majors |
-| R34 (opener rebid new suit) | 8 | Level/strain selection |
-| R43 (Jacoby shortness) | 5 | 4D splinter vs 3C/3H selection |
-| R40 (transfer continuation) | 5 | Second suit, pass/game boundary |
+| R24 (1NT over suit) | 6 | Balanced hands that should raise instead |
+| R46 (responder rebid after opener NT) | 6 | Complex 2C continuations |
+| R23 (respond new suit major) | 5 | Suit selection over minors |
+| R65a2 (opener rebid own suit) | 5 | 3NT preferred over suit rebid |
+| R35 (opener game after raise) | 4 | Trial bid vs direct game |
+| R64 (responder preference) | 4 | NT preference vs suit return |
 
 ### Recommended approach
 1. Group remaining wrongs by `(ruleId, expected_vs_got)` pattern.
@@ -50,4 +51,15 @@
 
 ### Eventual override removal
 Once correct rate reaches ~75%+, consider removing `R00-inherited-compatibility-override` and accepting the remaining mismatches as design divergences from the inherited SAYC engine.
+
+### Recent additions (this pass)
+- Blackwood ace responses (aceCount helper)
+- 2C strong opening continuations (2C-2D-3N, 2C-2D-2N)
+- Jacoby 2NT second suit show at 4-level (R43b)
+- 1D response over 1C (R23a)
+- New suit over major with game values (R27a)
+- Jump raise minor (R28b)
+- 1-level competitive overcall (R56a), double 1NT (R56b), balancing overcall (R56c)
+- 1NT opener run after X/XX (R65c0)
+- 1NT opener Stayman response (R65c2) and transfer completion (R65c)
 
