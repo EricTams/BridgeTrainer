@@ -1214,12 +1214,33 @@ export const RULES = [
     },
   },
   {
+    id: 'R23a-respond-1d-over-1c',
+    priority: 123,
+    description: 'Respond 1D over partner 1C opening with 4+ diamonds and 6+ HCP',
+    applies: c => isResponderFirstTurn(c) &&
+      !!c.partnerBid &&
+      c.partnerBid.level === 1 &&
+      c.partnerBid.strain === Strain.CLUBS &&
+      !c.opponentBid &&
+      suitLength(c, Strain.DIAMONDS) >= 4 &&
+      c.evaluation.hcp >= 6 &&
+      !hasFourCardMajor(c),
+    propose: () => contractBid(1, Strain.DIAMONDS),
+  },
+  {
     id: 'R24-respond-1nt-over-suit',
     priority: 122,
-    description: 'Bid 1NT over one-suit opening with 6-9 and no fit',
+    description: 'Bid 1NT over one-suit opening with 6-12 balanced and no long suit to show',
     applies: c => isResponderFirstTurn(c) && partnerOpenedSuitAtOne(c) &&
-      c.evaluation.hcp >= 6 && c.evaluation.hcp <= 9 &&
-      (!c.partnerBid || c.partnerBid.strain === Strain.NOTRUMP || suitLength(c, c.partnerBid.strain) < 3),
+      c.evaluation.hcp >= 6 && c.evaluation.hcp <= 12 &&
+      !c.opponentBid &&
+      isSemiOrBalanced(c) &&
+      (!c.partnerBid || c.partnerBid.strain === Strain.NOTRUMP ||
+       suitLength(c, c.partnerBid.strain) < 4 ||
+       (isBalancedContext(c) && (c.partnerBid.strain === Strain.CLUBS || c.partnerBid.strain === Strain.DIAMONDS))) &&
+      !SUIT_STRAINS.some(s => c.partnerBid && s !== c.partnerBid.strain && suitLength(c, s) >= 5) &&
+      !(hasFourCardMajor(c) && c.evaluation.hcp <= 9 &&
+        c.partnerBid && (c.partnerBid.strain === Strain.CLUBS || c.partnerBid.strain === Strain.DIAMONDS)),
     propose: () => contractBid(1, Strain.NOTRUMP),
   },
   {
@@ -1247,12 +1268,13 @@ export const RULES = [
   {
     id: 'R24z-respond-3nt-over-major-balanced',
     priority: 121,
-    description: 'Bid 3NT over one-level major opening with balanced game values',
+    description: 'Bid 3NT over one-level major opening with balanced game+ values',
     applies: c => isResponderFirstTurn(c) &&
       partnerOpenedMajorAtOne(c) &&
       !c.opponentBid &&
-      isBalancedContext(c) &&
-      c.evaluation.hcp >= 15 && c.evaluation.hcp <= 17,
+      isSemiOrBalanced(c) &&
+      c.evaluation.hcp >= 13 &&
+      !hasFourCardSupportForPartner(c),
     propose: () => contractBid(3, Strain.NOTRUMP),
   },
   {
@@ -1335,6 +1357,25 @@ export const RULES = [
     propose: () => contractBid(2, Strain.NOTRUMP),
   },
   {
+    id: 'R27a-respond-new-suit-over-major-game-values',
+    priority: 122,
+    description: 'Bid new suit over major opening with game-forcing values',
+    applies: c => isResponderFirstTurn(c) &&
+      partnerOpenedMajorAtOne(c) &&
+      !c.opponentBid &&
+      c.evaluation.hcp >= 10 &&
+      SUIT_STRAINS.some(s => c.partnerBid && s !== c.partnerBid.strain && suitLength(c, s) >= 5) &&
+      !hasFourCardSupportForPartner(c),
+    propose: c => {
+      if (!c.partnerBid) return contractBid(2, Strain.CLUBS);
+      for (const s of suitsByLength(c, c.partnerBid.strain, 5)) {
+        const bid = lowestLegalContractForStrain(c, s);
+        if (bid) return bid;
+      }
+      return contractBid(2, Strain.CLUBS);
+    },
+  },
+  {
     id: 'R28a-respond-jump-shift-strong',
     priority: 121,
     description: 'Jump shift response with 19+ and long suit',
@@ -1351,16 +1392,21 @@ export const RULES = [
     },
   },
   {
-    id: 'R28b-respond-jump-raise-minor-game',
+    id: 'R28b-respond-jump-raise-minor',
     priority: 120,
-    description: 'Jump raise partner minor to game with strong support',
+    description: 'Jump raise partner minor with strong support',
     applies: c => isResponderFirstTurn(c) && partnerOpenedSuitAtOne(c) &&
       !!c.partnerBid &&
       (c.partnerBid.strain === Strain.CLUBS || c.partnerBid.strain === Strain.DIAMONDS) &&
       suitLength(c, c.partnerBid.strain) >= 5 &&
-      c.evaluation.hcp >= 13,
-    propose: c => contractBid(c.partnerBid ? (c.evaluation.hcp >= 14 ? 5 : 4) : 3,
-      c.partnerBid ? c.partnerBid.strain : Strain.CLUBS),
+      c.evaluation.hcp >= 10 &&
+      !hasFourCardMajor(c),
+    propose: c => {
+      if (!c.partnerBid) return contractBid(3, Strain.CLUBS);
+      if (c.evaluation.hcp >= 16) return contractBid(5, c.partnerBid.strain);
+      if (c.evaluation.hcp >= 13) return contractBid(4, c.partnerBid.strain);
+      return contractBid(3, c.partnerBid.strain);
+    },
   },
   {
     id: 'R28-respond-new-suit-two-level',
@@ -1597,18 +1643,18 @@ export const RULES = [
       if (!target) return pass();
       const len = suitLength(c, target);
       const hcp = c.evaluation.hcp;
-      if (hcp <= 7 && len <= 5) return pass();
-      if (hcp <= 7 && len >= 6) {
-        if (hasFiveCardSuitBesidesTarget(c, target)) {
-          const secondSuit = longestSuitExcluding(c, target);
-          return contractBid(2, secondSuit);
-        }
-        return contractBid(3, target);
+      if (hcp <= 7 && len <= 5 && hasFiveCardSuitBesidesTarget(c, target)) {
+        const secondSuit = longestSuitExcluding(c, target);
+        const bid = lowestLegalContractForStrain(c, secondSuit);
+        if (bid) return bid;
       }
+      if (hcp <= 5 && len >= 6) return pass();
+      if (hcp <= 7 && len <= 5) return pass();
+      if (hcp <= 7 && len >= 6) return contractBid(3, target);
       if (hcp >= 8 && hcp <= 9 && len >= 6) return contractBid(4, target);
       if (hcp >= 8 && hcp <= 9) return contractBid(2, Strain.NOTRUMP);
       if (len >= 6 && hcp >= 10) return contractBid(4, target);
-      if (hcp >= 14 && hasFiveCardSuitBesidesTarget(c, target)) {
+      if (hcp >= 10 && hasFiveCardSuitBesidesTarget(c, target)) {
         const secondSuit = longestSuitExcluding(c, target);
         return contractBid(3, secondSuit);
       }
@@ -1891,13 +1937,14 @@ export const RULES = [
   {
     id: 'R42c-opener-invite-over-major-simple-raise',
     priority: 106,
-    description: 'Over major single raise, invite by showing a new suit or bidding 3 of trump',
+    description: 'Over major single raise, invite with trial bid',
     applies: c => responderSignedOffMajorRaise(c) &&
       !!c.partnerBid &&
       c.partnerBid.level === 2 &&
       c.evaluation.hcp >= 16 && c.evaluation.hcp <= 17,
     propose: c => {
       if (!c.ownBid) return pass();
+      if (isSemiOrBalanced(c)) return contractBid(2, Strain.NOTRUMP);
       for (const s of SUIT_STRAINS) {
         if (s === c.ownBid.strain) continue;
         if (suitLength(c, s) >= 4) {
@@ -1969,6 +2016,23 @@ export const RULES = [
     propose: c => contractBid(4, c.ownBid ? c.ownBid.strain : Strain.HEARTS),
   },
   {
+    id: 'R43b-jacoby-2nt-opener-second-suit',
+    priority: 106,
+    description: 'After Jacoby 2NT, show strong second suit at 4-level',
+    applies: c => isJacoby2NtContinuation(c) &&
+      !!c.ownBid &&
+      SUIT_STRAINS.some(s => s !== c.ownBid.strain && suitLength(c, s) >= 5),
+    propose: c => {
+      if (!c.ownBid) return contractBid(4, Strain.DIAMONDS);
+      const trump = c.ownBid.strain;
+      for (const suit of SUIT_STRAINS) {
+        if (suit === trump) continue;
+        if (suitLength(c, suit) >= 5) return contractBid(4, suit);
+      }
+      return contractBid(4, Strain.DIAMONDS);
+    },
+  },
+  {
     id: 'R43-jacoby-2nt-opener-shortness',
     priority: 105,
     description: 'After Jacoby 2NT, show shortness',
@@ -1985,10 +2049,7 @@ export const RULES = [
         const len = suitLength(c, suit);
         if (len < shortLen) { shortSuit = suit; shortLen = len; }
       }
-      if (shortSuit && shortLen <= 1) {
-        if (c.evaluation.hcp >= 15) return contractBid(4, shortSuit);
-        return contractBid(3, shortSuit);
-      }
+      if (shortSuit && shortLen <= 1) return contractBid(3, shortSuit);
       return contractBid(3, Strain.NOTRUMP);
     },
   },
@@ -2095,6 +2156,8 @@ export const RULES = [
     applies: c => c.phase === 'competitive' &&
       !c.ownBid &&
       !!c.opponentBid &&
+      c.opponentBid.level <= 2 &&
+      c.opponentBid.strain !== Strain.NOTRUMP &&
       c.evaluation.hcp >= 8 &&
       c.evaluation.hcp <= 16 &&
       hasOvercallSuit(c),
@@ -2408,6 +2471,57 @@ export const RULES = [
     },
   },
 
+  // ── Competitive: direct overcall at 1 level with 4+ suit ────────────
+  {
+    id: 'R56a-competitive-1-level-overcall',
+    priority: 97,
+    description: 'Overcall at one level with 4+ suit and opening values',
+    applies: c => c.phase === 'competitive' &&
+      !c.ownBid &&
+      !!c.opponentBid &&
+      c.opponentBid.level === 1 &&
+      c.evaluation.hcp >= 10 &&
+      SUIT_STRAINS.some(s => s !== c.opponentBid.strain && suitLength(c, s) >= 4 &&
+        suitOrderIndex(s) > suitOrderIndex(c.opponentBid.strain)),
+    propose: c => {
+      const opp = c.opponentBid ? c.opponentBid.strain : Strain.CLUBS;
+      for (const s of suitsByLength(c, opp, 4)) {
+        if (suitOrderIndex(s) > suitOrderIndex(opp)) {
+          return contractBid(1, s);
+        }
+      }
+      return pass();
+    },
+  },
+  // ── Competitive: double 1NT with strong hand ───────────────────────
+  {
+    id: 'R56b-competitive-double-1nt',
+    priority: 97,
+    description: 'Double opponent 1NT with strong values',
+    applies: c => c.phase === 'competitive' &&
+      !c.ownBid &&
+      !!c.opponentBid &&
+      c.opponentBid.level === 1 &&
+      c.opponentBid.strain === Strain.NOTRUMP &&
+      c.evaluation.hcp >= 15,
+    propose: () => dbl(),
+  },
+  // ── Competitive: overcall in balancing seat ────────────────────────
+  {
+    id: 'R56c-competitive-balancing-overcall',
+    priority: 96,
+    description: 'Overcall or compete in balancing position',
+    applies: c => c.phase === 'competitive' &&
+      !c.ownBid &&
+      !!c.opponentBid &&
+      c.evaluation.hcp >= 8 &&
+      SUIT_STRAINS.some(s => suitLength(c, s) >= 5),
+    propose: c => {
+      const best = longestSuit(c);
+      const bid = lowestLegalContractForStrain(c, best);
+      return bid || pass();
+    },
+  },
   // ── Competitive: pass in balancing/late positions ──────────────────────
   {
     id: 'R56-competitive-pass-late',
@@ -2836,7 +2950,8 @@ export const RULES = [
       !!c.partnerBid &&
       c.partnerBid.strain !== c.ownBid.strain &&
       c.partnerBid.strain !== Strain.NOTRUMP &&
-      suitLength(c, c.ownBid.strain) >= 5,
+      suitLength(c, c.ownBid.strain) >= 5 &&
+      !(c.opponentBid && c.opponentBid.level >= 4),
     propose: c => {
       if (!c.ownBid) return pass();
       const bid = lowestLegalContractForStrain(c, c.ownBid.strain);
@@ -2878,6 +2993,22 @@ export const RULES = [
     },
   },
 
+  // ── 1NT opener: run after X/XX or compete after interference ─────────
+  {
+    id: 'R65c0-1nt-opener-run-after-trouble',
+    priority: 108,
+    description: 'After 1NT is doubled/redoubled, run to best suit',
+    applies: c => isOpenerRebid(c) &&
+      !!c.ownBid &&
+      c.ownBid.level === 1 &&
+      c.ownBid.strain === Strain.NOTRUMP &&
+      !c.partnerBid,
+    propose: c => {
+      const best = longestSuit(c);
+      const bid = lowestLegalContractForStrain(c, best);
+      return bid || pass();
+    },
+  },
   // ── 1NT opener: complete transfer when partner bid 2D or 2H ─────────
   {
     id: 'R65c-1nt-opener-complete-transfer',
@@ -2928,7 +3059,8 @@ export const RULES = [
     applies: c => isResponderRebid(c) &&
       !!c.ownBid &&
       suitLength(c, c.ownBid.strain) >= 5 &&
-      c.evaluation.hcp >= 8,
+      c.evaluation.hcp >= 8 &&
+      !(c.partnerLastBid && c.partnerLastBid.level >= 6),
     propose: c => {
       if (!c.ownBid) return pass();
       const bid = lowestLegalContractForStrain(c, c.ownBid.strain);
