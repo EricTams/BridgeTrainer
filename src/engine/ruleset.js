@@ -470,6 +470,65 @@ function isStaymanContinuation(context) {
  * @param {RuleContext} context
  * @returns {boolean}
  */
+function isStaymanInterferenceByOpponents(context) {
+  if (!isOpenerRebid(context) || !context.partnerBid || !context.ownBid) return false;
+  return context.ownBid.level === 1 &&
+    context.ownBid.strain === Strain.NOTRUMP &&
+    context.partnerBid.level === 2 &&
+    context.partnerBid.strain === Strain.CLUBS &&
+    !!context.opponentBid &&
+    context.opponentBid.level >= 2;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function responderSignedOffMajorRaise(context) {
+  if (!isOpenerRebid(context) || !context.ownBid || !context.partnerBid) return false;
+  if (context.ownBid.level !== 1) return false;
+  if (!(context.ownBid.strain === Strain.HEARTS || context.ownBid.strain === Strain.SPADES)) return false;
+  return context.partnerBid.strain === context.ownBid.strain &&
+    (context.partnerBid.level === 2 || context.partnerBid.level === 3);
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function responderMadeMinorLimitRaise(context) {
+  if (!isOpenerRebid(context) || !context.ownBid || !context.partnerBid) return false;
+  if (context.ownBid.level !== 1 || context.partnerBid.level !== 3) return false;
+  if (!(context.ownBid.strain === Strain.CLUBS || context.ownBid.strain === Strain.DIAMONDS)) return false;
+  return context.partnerBid.strain === context.ownBid.strain;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function isOneNtOpenerAfterQuantitativeFourNt(context) {
+  if (!isOpenerRebid(context) || !context.ownBid || !context.partnerBid) return false;
+  return context.ownBid.level === 1 &&
+    context.ownBid.strain === Strain.NOTRUMP &&
+    context.partnerBid.level === 4 &&
+    context.partnerBid.strain === Strain.NOTRUMP;
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
+function partnerOpenedMinorAtOne(context) {
+  return !!context.partnerBid &&
+    context.partnerBid.level === 1 &&
+    (context.partnerBid.strain === Strain.CLUBS || context.partnerBid.strain === Strain.DIAMONDS);
+}
+
+/**
+ * @param {RuleContext} context
+ * @returns {boolean}
+ */
 function isTransferContinuation(context) {
   if (!isResponderRebid(context) || !context.ownBid || !context.partnerLastBid) return false;
   const own = context.ownBid;
@@ -814,6 +873,42 @@ export const RULES = [
     propose: () => contractBid(1, Strain.NOTRUMP),
   },
   {
+    id: 'R24a-respond-2nt-over-minor',
+    priority: 121,
+    description: 'Bid 2NT over minor opening with balanced invitational values and no fit',
+    applies: c => isResponderFirstTurn(c) &&
+      partnerOpenedMinorAtOne(c) &&
+      isSemiOrBalanced(c) &&
+      c.evaluation.hcp >= 10 && c.evaluation.hcp <= 12 &&
+      !hasFourCardMajor(c) &&
+      (!c.partnerBid || suitLength(c, c.partnerBid.strain) < 4),
+    propose: () => contractBid(2, Strain.NOTRUMP),
+  },
+  {
+    id: 'R24b-respond-3nt-over-minor',
+    priority: 121,
+    description: 'Bid 3NT over minor opening with balanced game values and no fit',
+    applies: c => isResponderFirstTurn(c) &&
+      partnerOpenedMinorAtOne(c) &&
+      isSemiOrBalanced(c) &&
+      c.evaluation.hcp >= 13 &&
+      !hasFourCardMajor(c) &&
+      (!c.partnerBid || suitLength(c, c.partnerBid.strain) < 4),
+    propose: () => contractBid(3, Strain.NOTRUMP),
+  },
+  {
+    id: 'R24c-respond-weak-jump-to-major-game',
+    priority: 121,
+    description: 'Use weak jump to game over major opening with long trump support',
+    applies: c => isResponderFirstTurn(c) &&
+      partnerOpenedSuitAtOne(c) &&
+      !!c.partnerBid &&
+      (c.partnerBid.strain === Strain.HEARTS || c.partnerBid.strain === Strain.SPADES) &&
+      suitLength(c, c.partnerBid.strain) >= 5 &&
+      c.evaluation.hcp <= 9,
+    propose: c => contractBid(4, c.partnerBid ? c.partnerBid.strain : Strain.SPADES),
+  },
+  {
     id: 'R25-respond-single-raise',
     priority: 121,
     description: 'Single raise with 3+ support and 6-9',
@@ -986,6 +1081,13 @@ export const RULES = [
     },
   },
   {
+    id: 'R39a-responder-rebid-stayman-weak-signoff',
+    priority: 108,
+    description: 'After Stayman response, sign off with weak values',
+    applies: c => isStaymanContinuation(c) && c.evaluation.hcp <= 7,
+    propose: () => pass(),
+  },
+  {
     id: 'R40-responder-rebid-transfer-complete',
     priority: 108,
     description: 'After transfer completion, place contract by strength',
@@ -999,6 +1101,41 @@ export const RULES = [
       if (c.evaluation.hcp >= 13 && suitLength(c, target) >= 5) return contractBid(4, target);
       return contractBid(3, Strain.NOTRUMP);
     },
+  },
+  {
+    id: 'R40a-opener-pass-after-stayman-interference',
+    priority: 108,
+    description: 'After Stayman is overcalled, pass with minimum and no penalty double',
+    applies: c => isStaymanInterferenceByOpponents(c) && c.evaluation.hcp <= 16,
+    propose: () => pass(),
+  },
+  {
+    id: 'R40b-opener-double-after-stayman-interference',
+    priority: 109,
+    description: 'After Stayman is overcalled, double with strength for penalty',
+    applies: c => isStaymanInterferenceByOpponents(c) && c.evaluation.hcp >= 17,
+    propose: () => dbl(),
+  },
+  {
+    id: 'R40c-opener-accept-quantitative-4nt',
+    priority: 108,
+    description: 'After partner quantitative 4NT, accept to 6NT with maximum',
+    applies: c => isOneNtOpenerAfterQuantitativeFourNt(c) && c.evaluation.hcp >= 17,
+    propose: () => contractBid(6, Strain.NOTRUMP),
+  },
+  {
+    id: 'R40d-opener-max-decline-quantitative-4nt',
+    priority: 107,
+    description: 'After partner quantitative 4NT, bid 5NT with medium maximum',
+    applies: c => isOneNtOpenerAfterQuantitativeFourNt(c) && c.evaluation.hcp === 16,
+    propose: () => contractBid(5, Strain.NOTRUMP),
+  },
+  {
+    id: 'R40e-opener-pass-quantitative-4nt',
+    priority: 106,
+    description: 'After partner quantitative 4NT, pass with minimum',
+    applies: c => isOneNtOpenerAfterQuantitativeFourNt(c) && c.evaluation.hcp <= 15,
+    propose: () => pass(),
   },
   {
     id: 'R41-opener-accept-invite-after-1nt',
@@ -1026,6 +1163,71 @@ export const RULES = [
       c.ownBid.level === 1 &&
       c.ownBid.strain === Strain.NOTRUMP &&
       c.evaluation.hcp <= 16,
+    propose: () => pass(),
+  },
+  {
+    id: 'R42a-opener-game-over-major-limit-raise',
+    priority: 107,
+    description: 'Over major limit raise, bid game with maximum values',
+    applies: c => responderSignedOffMajorRaise(c) &&
+      !!c.partnerBid &&
+      c.partnerBid.level === 3 &&
+      c.evaluation.hcp >= 16,
+    propose: c => contractBid(4, c.ownBid ? c.ownBid.strain : Strain.SPADES),
+  },
+  {
+    id: 'R42b-opener-pass-over-major-limit-raise',
+    priority: 106,
+    description: 'Over major limit raise, pass with minimum values',
+    applies: c => responderSignedOffMajorRaise(c) &&
+      !!c.partnerBid &&
+      c.partnerBid.level === 3 &&
+      c.evaluation.hcp <= 15,
+    propose: () => pass(),
+  },
+  {
+    id: 'R42c-opener-invite-over-major-simple-raise',
+    priority: 106,
+    description: 'Over major single raise, invite with notrump on stronger balanced hands',
+    applies: c => responderSignedOffMajorRaise(c) &&
+      !!c.partnerBid &&
+      c.partnerBid.level === 2 &&
+      isSemiOrBalanced(c) &&
+      c.evaluation.hcp >= 16 && c.evaluation.hcp <= 17,
+    propose: () => contractBid(2, Strain.NOTRUMP),
+  },
+  {
+    id: 'R42d-opener-game-over-major-simple-raise',
+    priority: 105,
+    description: 'Over major single raise, bid game with strong values',
+    applies: c => responderSignedOffMajorRaise(c) &&
+      !!c.partnerBid &&
+      c.partnerBid.level === 2 &&
+      c.evaluation.hcp >= 18,
+    propose: c => contractBid(4, c.ownBid ? c.ownBid.strain : Strain.SPADES),
+  },
+  {
+    id: 'R42e-opener-pass-over-major-simple-raise',
+    priority: 104,
+    description: 'Over major single raise, pass with minimum values',
+    applies: c => responderSignedOffMajorRaise(c) &&
+      !!c.partnerBid &&
+      c.partnerBid.level === 2 &&
+      c.evaluation.hcp <= 15,
+    propose: () => pass(),
+  },
+  {
+    id: 'R42f-opener-game-over-minor-limit-raise',
+    priority: 104,
+    description: 'Over minor limit raise, bid minor game with strong values',
+    applies: c => responderMadeMinorLimitRaise(c) && c.evaluation.hcp >= 16,
+    propose: c => contractBid(5, c.ownBid ? c.ownBid.strain : Strain.DIAMONDS),
+  },
+  {
+    id: 'R42g-opener-pass-over-minor-limit-raise',
+    priority: 103,
+    description: 'Over minor limit raise, pass with minimum values',
+    applies: c => responderMadeMinorLimitRaise(c) && c.evaluation.hcp <= 15,
     propose: () => pass(),
   },
   {
