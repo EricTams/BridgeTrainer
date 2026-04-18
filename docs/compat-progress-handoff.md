@@ -3,7 +3,8 @@
 ## Current state
 
 - Branch: `cursor/implement-missing-rule-families-d513`
-- Last commit: `87155e9` (`Add targeted SAYC continuation rules to reduce no-rec cases`)
+- Latest commit on branch: `93ff12f` (`Add compatibility progress handoff note`)
+- Key rules commit: `87155e9` (`Add targeted SAYC continuation rules to reduce no-rec cases`)
 - Inherited suite status (with compatibility override enabled):
   - `node run-inherited-suite.mjs` -> **Passed 447, Failed 0**
 - Override-disabled no-recommendation status:
