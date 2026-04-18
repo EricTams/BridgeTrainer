@@ -1376,32 +1376,4 @@ export const RULES = [
       c.evaluation.hcp >= 10,
     propose: () => contractBid(3, Strain.NOTRUMP),
   },
-  {
-    id: 'R90-natural-pass-competitive',
-    priority: 1,
-    description: 'Natural pass in competitive auctions when no explicit action applies',
-    applies: c => c.phase === 'competitive',
-    propose: () => pass(),
-  },
-  {
-    id: 'R91-natural-pass-rebid',
-    priority: 1,
-    description: 'Natural rebid pass when no explicit continuation applies',
-    applies: c => c.phase === 'rebid',
-    propose: () => pass(),
-  },
-  {
-    id: 'R92-natural-pass-responding',
-    priority: 1,
-    description: 'Natural responding pass when no explicit response applies',
-    applies: c => c.phase === 'responding',
-    propose: () => pass(),
-  },
-  {
-    id: 'R93-emergency-pass',
-    priority: 0,
-    description: 'Emergency legal pass',
-    applies: c => c.phase !== 'passed-out',
-    propose: () => pass(),
-  },
 ];
