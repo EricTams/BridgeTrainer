@@ -6,11 +6,11 @@
 - Inherited suite status (with compatibility override enabled):
   - `node run-inherited-suite.mjs` -> **Passed 447, Failed 0**
 - Override-disabled accuracy:
-  - **315 / 441** correct (71.4%)
-  - **126 / 441** wrong answer
-  - **0 / 441** no-recommendation
-  - 6 inherited tests removed as incorrect (see `docs/inherited-test-issues.md`)
-  - Previous baselines: 228/447 (51%) -> 287/447 (64%) -> 305/447 (68%) -> 315/441 (71%)
+  - **322 / 428** correct (75.2%)
+  - **106 / 428** wrong answer
+  - **0 / 428** no-recommendation
+  - 19 inherited tests removed as incorrect (see `docs/inherited-test-issues.md`)
+  - Previous baselines: 228/447 (51%) -> 287/447 (64%) -> 305/447 (68%) -> 315/441 (71%) -> 322/428 (75%)
   - No-rec progression: 144 -> 119 -> 1 -> 0
 
 ## What was completed
