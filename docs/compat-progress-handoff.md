@@ -6,10 +6,10 @@
 - Inherited suite status (with compatibility override enabled):
   - `node run-inherited-suite.mjs` -> **Passed 447, Failed 0**
 - Override-disabled accuracy:
-  - **305 / 447** correct (68%)
-  - **142 / 447** wrong answer
+  - **314 / 447** correct (70%)
+  - **133 / 447** wrong answer
   - **0 / 447** no-recommendation
-  - Previous baselines: 228 correct (51%) -> 287 (64%) -> 305 (68%)
+  - Previous baselines: 228 correct (51%) -> 287 (64%) -> 305 (68%) -> 314 (70%)
   - No-rec progression: 144 -> 119 -> 1 -> 0
 
 ## What was completed
@@ -35,13 +35,12 @@
 
 | Rule | Cases | Pattern |
 |------|-------|---------|
-| R65 (rebid pass default) | 13 | Various opener/responder rebid gaps |
-| R24 (1NT over suit) | 6 | Balanced hands that should raise instead |
-| R46 (responder rebid after opener NT) | 6 | Complex 2C continuations |
-| R23 (respond new suit major) | 5 | Suit selection over minors |
-| R65a2 (opener rebid own suit) | 5 | 3NT preferred over suit rebid |
-| R35 (opener game after raise) | 4 | Trial bid vs direct game |
-| R64 (responder preference) | 4 | NT preference vs suit return |
+| R46 (responder rebid after opener NT) | 6 | 2C-2D-3N suit selection, Blackwood |
+| R65 (rebid pass default) | 5 | Rare competitive/continuation gaps |
+| R23 (respond new suit major) | 5 | Suit preference over minors |
+| R42c (opener invite over raise) | 4 | Trial bid selection |
+| R49 (competitive overcall) | 4 | Level selection edge cases |
+| R65d (responder rebid show suit) | 4 | Wrong level/pass decision |
 
 ### Recommended approach
 1. Group remaining wrongs by `(ruleId, expected_vs_got)` pattern.
@@ -52,14 +51,20 @@
 ### Eventual override removal
 Once correct rate reaches ~75%+, consider removing `R00-inherited-compatibility-override` and accepting the remaining mismatches as design divergences from the inherited SAYC engine.
 
-### Recent additions (this pass)
+### Recent additions (latest pass)
 - Blackwood ace responses (aceCount helper)
 - 2C strong opening continuations (2C-2D-3N, 2C-2D-2N)
 - Jacoby 2NT second suit show at 4-level (R43b)
 - 1D response over 1C (R23a)
 - New suit over major with game values (R27a)
-- Jump raise minor (R28b)
+- Jump raise minor (R28b), jump shift strong (R28a)
 - 1-level competitive overcall (R56a), double 1NT (R56b), balancing overcall (R56c)
 - 1NT opener run after X/XX (R65c0)
 - 1NT opener Stayman response (R65c2) and transfer completion (R65c)
+- Opener new suit after minor raise (R65a00)
+- Opener compete after interference with 16+ (R65b0)
+- Trial bid over simple raise with 18+ and side suit (R42d0)
+- Responder raise partner major to game (R64a00)
+- Responder accept opener 2NT invite (R64a0)
+- Limit raise with 3+ major support (R26 widened)
 
