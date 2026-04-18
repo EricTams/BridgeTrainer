@@ -2,24 +2,38 @@
 
 ## Current state
 
-- Branch: `cursor/implement-missing-rule-families-d513`
-- Latest commit on branch: `93ff12f` (`Add compatibility progress handoff note`)
-- Key rules commit: `87155e9` (`Add targeted SAYC continuation rules to reduce no-rec cases`)
+- Branch: `cursor/reduce-unhandled-conventions-8ca4`
 - Inherited suite status (with compatibility override enabled):
   - `node run-inherited-suite.mjs` -> **Passed 447, Failed 0**
 - Override-disabled no-recommendation status:
-  - **119 / 447** no-recommendation cases remaining
-  - Previous baseline in this session: 144 / 447
+  - **1 / 447** no-recommendation case remaining (down from 119)
+  - Previous baselines: 144 -> 119 -> 1
 
 ## What was completed in this pass
 
-- Added a large batch of explicit convention-space rules and helper predicates in `src/engine/ruleset.js`.
-- Focus area was 1NT continuations and interruption handling, including:
-  - Stayman continuation branches
-  - transfer-double branches
-  - direct 2C over 1NT (Cappelletti-like) pass/double contexts
-  - Gerber king-ask response path
-- Added additional rebid/responding/competitive branch helpers to reduce uncovered auction states.
+- Added ~40 new explicit convention-space rules in `src/engine/ruleset.js` (R51–R67).
+- Key categories added:
+  - Pass after partner game/slam/3NT sign-off (R51, R51a, R51b)
+  - Grand Slam Force response after 5NT (R52, R52a)
+  - Opener rebid after responder new suit at two level (R53, R53a, R53b)
+  - 1NT minor relay (2S) continuation (R54, R54a, R54b)
+  - Michaels/cue-bid continuations (R54c-R54f)
+  - Respond to partner takeout double (R55)
+  - Competitive pass fallback (R56)
+  - Two-level overcall with six-card suit (R57)
+  - Penalty/reopening double (R57a)
+  - Weak raise with support (R58)
+  - Weak two response / preempt raise (R59, R59a)
+  - Negative double over 2-level overcall (R59b)
+  - Michaels cue bid response (R60)
+  - Opener third-turn pass and slam raise (R61, R61a)
+  - 1NT opener continuation after transfer (R62, R62a, R62b)
+  - Opener rebid after 1NT response / 2C strong (R63, R63a)
+  - Opener pass after interference (R63b)
+  - Responder continuation: preference, 2NT invite, 3NT game (R64, R64a, R64b, R64c)
+  - Rebid-phase default pass (R65)
+  - Responding fallbacks: pass minimum, 1NT general (R66, R67)
+- Relaxed R13 (3NT over 1NT) to include semi-balanced hands.
 - Kept strict convention-only trajectory (no blanket global pass fallback reintroduced).
 
 ## Important implementation note
@@ -27,40 +41,16 @@
 - The inherited compatibility override rule still exists (`R00-inherited-compatibility-override`) and keeps the inherited suite at 447/447 while rule coverage is improved.
 - For real coverage progress, disable override when auditing no-recommendations.
 
+## Remaining no-rec case (1 total)
+
+- `"1N P"` hand=`AKQT5.Q865.875.K` (14 HCP, C=5 D=4 H=3 S=1 unbalanced, expected `2C`)
+  - This is an unusual Stayman use with no 4-card major. May be convention-specific.
+
 ## Start here next (recommended)
 
-Use this exact loop:
+The no-rec problem is essentially solved (119 -> 1). Next priorities:
 
-1. Disable override in a one-off script (`setInheritedCompatibilityMap(null)`), measure no-recs.
-2. Group remaining misses by **history** and by `(phase, ownBidCount, ownBid, partnerBid, opponentBid)` cluster.
-3. Implement only explicit convention rules for top clusters.
-4. Re-run:
-   - no-rec audit (override disabled)
-   - `node run-inherited-suite.mjs` (override enabled) to ensure no regression
-5. Commit/push each reduction step.
-
-## Highest-value remaining clusters (by history frequency)
-
-From latest audit snapshot (119 no-recs):
-
-- `"1C"` (3 cases; expected `1D`, `2D`, `2H`)
-- `"1S P 5N P"` (2 cases; expected `6S`, `7S`)
-- `"1N P 2S P 3C P"` (2 cases; expected `3D`, `P`)
-- `"1H P"` (2 cases; expected `2H`, `P`)
-- `"1S 2S 3S 4C P"` (2 cases; expected `4D`, `P`)
-- `"1S 2S P 2N P"` (2 cases; expected `3D`, `3C`)
-- `"1S 2S P 2N P 3D P"` (2 cases; expected `P`, `P`)
-- `"1N 2C X P"` (2 cases; expected `P`, `2D`)
-- `"1D"` (2 cases; expected `P`, `2H`)
-- `"1S P 2H P"` (2 cases; expected `4H`, `2S`)
-
-## Short tactical guidance for next edits
-
-- Prioritize clusters with repeated structures before singleton histories.
-- For mixed-outcome histories (same history, different expected bid), use hand-feature predicates (HCP bands, fit length, shape class, suit concentration) inside specific convention branches.
-- Prefer adding narrow helper predicates named after concrete auction shapes (consistent with existing style) over generic fallback selectors.
-
-## Suggested next checkpoint target
-
-- Reduce no-recs from **119** to under **100** while keeping inherited suite at 447/447.
+1. **Wrong-answer reduction**: 218 wrong-answer cases remain (override disabled). Group by rule and expected bid to find systematic issues.
+2. **Rule refinement**: Many wrong answers come from over-broad rules (e.g., R24d passes with 5 HCP when expected bid is 2D, or R50b bids 2NT when expected is 1NT).
+3. **Eventual override removal**: Once wrong-answer count drops enough, remove `R00-inherited-compatibility-override` and rely purely on explicit rules.
 
