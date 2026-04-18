@@ -1840,11 +1840,12 @@ export const RULES = [
   {
     id: 'R42a-opener-game-over-major-limit-raise',
     priority: 107,
-    description: 'Over major limit raise, bid game with maximum values',
+    description: 'Over major limit raise, bid game with maximum or distributional values',
     applies: c => responderSignedOffMajorRaise(c) &&
       !!c.partnerBid &&
       c.partnerBid.level === 3 &&
-      c.evaluation.hcp >= 14,
+      (c.evaluation.hcp >= 14 ||
+       (c.evaluation.hcp >= 13 && !isBalancedContext(c))),
     propose: c => contractBid(4, c.ownBid ? c.ownBid.strain : Strain.SPADES),
   },
   {
@@ -2537,7 +2538,7 @@ export const RULES = [
     description: 'Opener accepts 2NT invite to 3NT with values',
     applies: c => c.phase === 'rebid' &&
       c.opener &&
-      c.ownBidCount >= 2 &&
+      c.ownBidCount >= 1 &&
       !!c.partnerLastBid &&
       c.partnerLastBid.level === 2 &&
       c.partnerLastBid.strain === Strain.NOTRUMP &&
@@ -2763,6 +2764,54 @@ export const RULES = [
       c.partnerLastBid.strain === Strain.NOTRUMP &&
       c.evaluation.hcp <= 9,
     propose: () => pass(),
+  },
+
+  // ── Opener rebid: Jacoby 2NT accept game ────────────────────────────────
+  {
+    id: 'R65a0-opener-rebid-jacoby-3nt',
+    priority: 105,
+    description: 'After Jacoby 2NT, bid 3NT with strong balanced hand',
+    applies: c => isJacoby2NtContinuation(c) &&
+      c.evaluation.hcp >= 15 &&
+      isSemiOrBalanced(c),
+    propose: () => contractBid(3, Strain.NOTRUMP),
+  },
+
+  // ── Opener rebid: raise partner suit at 2-level ────────────────────────
+  {
+    id: 'R65a1-opener-raise-new-suit-to-3',
+    priority: 104,
+    description: 'Opener raises partner new suit to 3-level with fit and extras',
+    applies: c => isOpenerRebid(c) &&
+      !!c.ownBid &&
+      !!c.partnerBid &&
+      c.partnerBid.strain !== Strain.NOTRUMP &&
+      c.partnerBid.strain !== c.ownBid.strain &&
+      c.partnerBid.level === 2 &&
+      suitLength(c, c.partnerBid.strain) >= 3 &&
+      c.evaluation.hcp >= 13,
+    propose: c => {
+      if (!c.partnerBid) return pass();
+      return contractBid(3, c.partnerBid.strain);
+    },
+  },
+
+  // ── Opener rebid: rebid own suit at minimum after new suit response ────
+  {
+    id: 'R65a2-opener-rebid-own-suit-after-new-suit',
+    priority: 103,
+    description: 'Opener rebids own suit after responder new suit response',
+    applies: c => isOpenerRebid(c) &&
+      !!c.ownBid &&
+      !!c.partnerBid &&
+      c.partnerBid.strain !== c.ownBid.strain &&
+      c.partnerBid.strain !== Strain.NOTRUMP &&
+      suitLength(c, c.ownBid.strain) >= 5,
+    propose: c => {
+      if (!c.ownBid) return pass();
+      const bid = lowestLegalContractForStrain(c, c.ownBid.strain);
+      return bid || pass();
+    },
   },
 
   // ── Opener rebid: jump-rebid own suit with extras ────────────────────────
