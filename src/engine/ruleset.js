@@ -1183,7 +1183,9 @@ export const RULES = [
       c.evaluation.hcp >= 6 &&
       !c.opponentBid &&
       hasFourCardMajor(c) &&
-      c.partnerBid?.strain !== Strain.NOTRUMP,
+      c.partnerBid?.strain !== Strain.NOTRUMP &&
+      !(c.partnerBid && c.partnerBid.strain === Strain.SPADES &&
+        isSemiOrBalanced(c) && c.evaluation.hcp >= 13),
     propose: c => {
       const partner = c.partnerBid;
       if (!partner) return contractBid(1, Strain.SPADES);
@@ -1191,12 +1193,15 @@ export const RULES = [
         return contractBid(1, Strain.SPADES);
       }
       if (partner.strain === Strain.SPADES && suitLength(c, Strain.HEARTS) >= 4) {
-        if (c.evaluation.hcp >= 10) return contractBid(2, Strain.HEARTS);
         return contractBid(2, Strain.HEARTS);
       }
       if (partner.strain === Strain.CLUBS || partner.strain === Strain.DIAMONDS) {
         const spLen = suitLength(c, Strain.SPADES);
         const hLen = suitLength(c, Strain.HEARTS);
+        if (hLen >= 4 && suitOrderIndex(Strain.HEARTS) > suitOrderIndex(partner.strain)) {
+          if (spLen >= 4 && hLen === spLen) return contractBid(1, Strain.HEARTS);
+          if (hLen > spLen) return contractBid(1, Strain.HEARTS);
+        }
         if (spLen >= 4 && suitOrderIndex(Strain.SPADES) > suitOrderIndex(partner.strain)) {
           return contractBid(1, Strain.SPADES);
         }
