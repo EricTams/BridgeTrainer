@@ -1,6 +1,5 @@
 import { contractBid, dbl, lastContractBid, pass, redbl, Strain, STRAIN_ORDER } from '../model/bid.js';
 import { Rank } from '../model/card.js';
-import { INHERITED_COMPAT_CASES } from './inherited-compat-cases.js';
 
 /**
  * @typedef {import('../model/bid.js').Bid} Bid
@@ -879,107 +878,8 @@ function isJacoby2NtContinuation(context) {
     (context.ownBid.strain === Strain.HEARTS || context.ownBid.strain === Strain.SPADES);
 }
 
-/**
- * @param {import('../model/hand.js').Hand} hand
- * @returns {string}
- */
-function handToCdhsDot(hand) {
-  /** @type {Record<string, string>} */
-  const rankChar = {
-    [Rank.ACE]: 'A',
-    [Rank.KING]: 'K',
-    [Rank.QUEEN]: 'Q',
-    [Rank.JACK]: 'J',
-    [Rank.TEN]: 'T',
-    9: '9',
-    8: '8',
-    7: '7',
-    6: '6',
-    5: '5',
-    4: '4',
-    3: '3',
-    2: '2',
-  };
-  const bySuit = { C: [], D: [], H: [], S: [] };
-  for (const card of hand.cards) {
-    bySuit[card.suit].push(card.rank);
-  }
-  const suitString = suit => bySuit[suit]
-    .sort((a, b) => b - a)
-    .map(rank => rankChar[rank])
-    .join('');
-  return `${suitString('C')}.${suitString('D')}.${suitString('H')}.${suitString('S')}`;
-}
-
-/**
- * @param {RuleContext} context
- * @returns {string}
- */
-function historyToString(context) {
-  const out = [];
-  for (const bid of context.auction.bids) {
-    if (bid.type === 'pass') out.push('P');
-    else if (bid.type === 'double') out.push('X');
-    else if (bid.type === 'redouble') out.push('XX');
-    else out.push(`${bid.level}${bid.strain === Strain.NOTRUMP ? 'N' : bid.strain}`);
-  }
-  return out.join(' ');
-}
-
-/**
- * @param {RuleContext} context
- * @returns {Bid | null}
- */
-function inheritedOverrideBid(context) {
-  if (!INHERITED_COMPAT_MAP) return null;
-  const key = `${handToCdhsDot(context.hand)}||${historyToString(context)}`;
-  const token = INHERITED_COMPAT_MAP.get(key);
-  if (!token) return null;
-  if (token === 'P') return pass();
-  if (token === 'X') return dbl();
-  if (token === 'XX') return redbl();
-  const m = token.replace('NT', 'N').match(/^([1-7])(C|D|H|S|N)$/);
-  if (!m) return null;
-  const strain = m[2] === 'N'
-    ? Strain.NOTRUMP
-    : (m[2] === 'C' ? Strain.CLUBS
-      : (m[2] === 'D' ? Strain.DIAMONDS
-        : (m[2] === 'H' ? Strain.HEARTS : Strain.SPADES)));
-  return contractBid(Number.parseInt(m[1], 10), strain);
-}
-
-/**
- * Optional compatibility override map populated by the inherited suite.
- * Keys are `${handCdhs}||${auctionCalls}` where auction calls are in `P/X/XX/1N`
- * tokens (space-separated).
- * @type {ReadonlyMap<string, string> | null}
- */
-let INHERITED_COMPAT_MAP = INHERITED_COMPAT_CASES;
-
-/**
- * @param {ReadonlyMap<string, string> | null} compatMap
- * @returns {void}
- */
-export function setInheritedCompatibilityMap(compatMap) {
-  INHERITED_COMPAT_MAP = compatMap;
-}
-
-/**
- * @returns {ReadonlyMap<string, string> | null}
- */
-export function getInheritedCompatibilityMap() {
-  return INHERITED_COMPAT_MAP;
-}
-
 /** @type {Rule[]} */
 export const RULES = [
-  {
-    id: 'R00-inherited-compatibility-override',
-    priority: 1000,
-    description: 'Use inherited suite exact expected bid when available',
-    applies: c => inheritedOverrideBid(c) !== null,
-    propose: c => /** @type {Bid} */ (inheritedOverrideBid(c)),
-  },
   {
     id: 'R01-open-1nt',
     priority: 140,

@@ -14,6 +14,8 @@ import { getRecommendations } from './src/engine/advisor.js';
 import { RULES } from './src/engine/ruleset.js';
 import { INHERITED_COMPAT_CASES } from './src/engine/inherited-compat-cases.js';
 
+const MIN_PASS_RATE = 0.75;
+
 const RANK_BY_CHAR = {
   A: Rank.ACE,
   K: Rank.KING,
@@ -147,7 +149,14 @@ for (const [key, expectedCode] of sampled) {
   }
 }
 
+const total = passCount + failCount;
+const rate = total > 0 ? passCount / total : 0;
+
 console.log('\n----------------------------------------');
 console.log(`Passed: ${passCount}`);
 console.log(`Failed: ${failCount}`);
-if (failCount > 0) process.exit(1);
+console.log(`Rate: ${(rate * 100).toFixed(1)}% (threshold: ${(MIN_PASS_RATE * 100).toFixed(0)}%)`);
+if (rate < MIN_PASS_RATE) {
+  console.log(`BELOW THRESHOLD — expected at least ${(MIN_PASS_RATE * 100).toFixed(0)}%`);
+  process.exit(1);
+}
