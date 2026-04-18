@@ -2949,6 +2949,28 @@ export const RULES = [
     },
   },
 
+  // ── Responder accept opener 2NT invite ──────────────────────────────────
+  {
+    id: 'R64a00-responder-raise-partner-major-to-game',
+    priority: 102,
+    description: 'Responder raises partner major to game with fit',
+    applies: c => isResponderRebid(c) &&
+      !!c.partnerLastBid &&
+      (c.partnerLastBid.strain === Strain.HEARTS || c.partnerLastBid.strain === Strain.SPADES) &&
+      suitLength(c, c.partnerLastBid.strain) >= 3,
+    propose: c => contractBid(4, c.partnerLastBid ? c.partnerLastBid.strain : Strain.HEARTS),
+  },
+  {
+    id: 'R64a0-responder-accept-opener-2nt',
+    priority: 101,
+    description: 'Responder bids 3NT after opener jumps to 2NT with values',
+    applies: c => isResponderRebid(c) &&
+      !!c.partnerLastBid &&
+      c.partnerLastBid.level === 2 &&
+      c.partnerLastBid.strain === Strain.NOTRUMP &&
+      c.evaluation.hcp >= 8,
+    propose: () => contractBid(3, Strain.NOTRUMP),
+  },
   // ── Responder rebid: 2NT with invitational values ──────────────────────
   {
     id: 'R64a-responder-rebid-2nt-invitational',
@@ -2981,6 +3003,27 @@ export const RULES = [
     propose: () => pass(),
   },
 
+  // ── Opener rebid after minor raise: show new suit ───────────────────────
+  {
+    id: 'R65a00-opener-new-suit-after-minor-raise',
+    priority: 106,
+    description: 'After partner raises minor, show a new suit with extras',
+    applies: c => isOpenerRebid(c) &&
+      !!c.ownBid &&
+      !!c.partnerBid &&
+      c.partnerBid.strain === c.ownBid.strain &&
+      (c.ownBid.strain === Strain.CLUBS || c.ownBid.strain === Strain.DIAMONDS) &&
+      c.evaluation.hcp >= 14 &&
+      SUIT_STRAINS.some(s => s !== c.ownBid.strain && suitLength(c, s) >= 4),
+    propose: c => {
+      if (!c.ownBid) return pass();
+      for (const s of suitsByLength(c, c.ownBid.strain, 4)) {
+        const bid = lowestLegalContractForStrain(c, s);
+        if (bid) return bid;
+      }
+      return pass();
+    },
+  },
   // ── Opener rebid: Jacoby 2NT accept game ────────────────────────────────
   {
     id: 'R65a0-opener-rebid-jacoby-3nt',
@@ -3071,7 +3114,8 @@ export const RULES = [
     id: 'R65c0-1nt-opener-run-after-trouble',
     priority: 108,
     description: 'After 1NT is doubled/redoubled, run to best suit',
-    applies: c => isOpenerRebid(c) &&
+    applies: c => c.phase === 'rebid' &&
+      c.opener &&
       !!c.ownBid &&
       c.ownBid.level === 1 &&
       c.ownBid.strain === Strain.NOTRUMP &&
