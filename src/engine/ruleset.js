@@ -2155,10 +2155,6 @@ export const RULES = [
         if (c.evaluation.hcp >= 3) return contractBid(3, Strain.CLUBS);
         return pass();
       }
-      if (partnerOpened2C && longestLen >= 5) {
-        const bid = lowestLegalContractForStrain(c, longest);
-        if (bid) return bid;
-      }
       if (c.partnerLastBid && c.partnerLastBid.level === 4 &&
           c.partnerLastBid.strain === Strain.NOTRUMP) {
         const aces = aceCount(c);
@@ -2166,6 +2162,10 @@ export const RULES = [
         if (aces === 1) return contractBid(5, Strain.DIAMONDS);
         if (aces === 2) return contractBid(5, Strain.HEARTS);
         return contractBid(5, Strain.SPADES);
+      }
+      if (partnerOpened2C && longestLen >= 5) {
+        const bid = lowestLegalContractForStrain(c, longest);
+        if (bid) return bid;
       }
       if (longestLen >= 7 && c.evaluation.hcp >= 10 &&
           (longest === Strain.HEARTS || longest === Strain.SPADES)) {

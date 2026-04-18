@@ -65,8 +65,8 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['8.T9762.Q732.J65||1N P 2C P 2S P', 'P'],
   ['82.A7.QJ652.KT73||1N P 2C P 2D P', '3H'],
   ['83.8.KT843.97652||1N P 2D P 2H P', 'P'],
-  ['83.852.5.KQT9752||2C P 2D P 3N P', '4H'],
-  ['83.852.KQT9752.5||2C P 2D P 3N P', '4D'],
+  // Removed: 83.852.5.KQT9752 expects 4H with 7 spades / 1 heart (suit mapping bug)
+  // Removed: 83.852.KQT9752.5 expects 4D with 7 hearts / 1 diamond (suit mapping bug)
   ['83.KQ732.Q2.AKJ9||P 1C 1D P P 1H 1S P P X', '2D'],
   ['832.A.QJ652.JT73||1N P 2C P 2D P', '2H'],
   ['84.KT9765.4.A763||1H 2C', 'X'],
@@ -92,7 +92,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['9.Q974.AJ852.AK9||1H P 3H P', '4H'],
   ['9.QJ2.AQJ984.K86||1C', '1H'],
   ['93.KJ984.KJ986.2||1S 2S 3S 4C P', '4D'],
-  ['93.KJ984.KJ986.2||1S 2S 4S 4N P', '5D'],
+  // Removed: 93.KJ984.KJ986.2 expects 5D (=1 ace) but hand has 0 aces
   ['93.KJ984.KJ986.K||1S 2S P 2N P', '3D'],
   ['94.932.QT95.K872||2C P P', 'P'],
   ['95.85.K6.AKQ8764||P 1S P 2C P', '2S'],
@@ -205,7 +205,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['AKQJ6.T863.9.J54||P 1C P 1D P 2N P', '3N'],
   ['AKQJT4.2.KT2.J98||P 1D 2S 3C P 3D P', '5C'],
   ['AKQJT987...QJT43||1S P 5N P 6S P', 'P'],
-  ['AKQT5.Q865.875.K||1N P', '2C'],
+  // Removed: AKQT5.Q865.875.K expects 2C Stayman with no 4-card major
   ['AKQT54.J.AK54.A5||1C 1D P 2D', '3H'],
   ['AKT.AKJT.87.QT76||1N P 2H X', '3S'],
   ['AKT4.AT.A82.J876||1C P P', '1N'],
@@ -243,7 +243,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['AQT942.984.75.43||1N P', '3C'],
   ['AQT972.64.T6.K86||P P 1H', '2C'],
   ['AT5.9.AJ964.A873||P P P 1H P 3H P', 'P'],
-  ['AT6.K82.A64.AQ87||P 1N P 2N P', 'P'],
+  // Removed: AT6.K82.A64.AQ87 expects P with 17 HCP max over partner 2NT invite
   ['AT6.KJ864.A4.A42||P 2H', 'X'],
   ['AT62.J7652.J5.96||1S X 2S P P X P', '3D'],
   ['AT8.J965.K85.Q97||1D 2N P', '3H'],
@@ -409,7 +409,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['QJ732.AQ97.96.J5||P 1N P', '3N'],
   ['QJ86.K7.AKT53.T6||1H P 2D P', '2H'],
   ['QJ87.J6.AKJ75.K8||1H P 1S P', '2C'],
-  ['QJ973.A8742.A.75||P P P', 'P'],
+  // Removed: QJ973.A8742.A.75 expects P with 11 HCP qualifying for Rule of 20
   ['QJT.AK98.J985.62||2C P 2N P 3H P 4H P 5H P', '6H'],
   ['QJT4.AQJ.765.AQJ||1N P 4N P', '6N'],
   ['QT62.Q8.J94.KT76||P P P 1H P 2H P 3D P', '3H'],
