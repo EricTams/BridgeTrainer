@@ -1247,7 +1247,6 @@ export const RULES = [
       (!c.partnerBid || c.partnerBid.strain === Strain.NOTRUMP ||
        suitLength(c, c.partnerBid.strain) < 3 ||
        (isBalancedContext(c) && suitLength(c, c.partnerBid.strain) <= 4 &&
-        c.evaluation.hcp <= 9 &&
         (c.partnerBid.strain === Strain.CLUBS || c.partnerBid.strain === Strain.DIAMONDS))) &&
       !SUIT_STRAINS.some(s => c.partnerBid && s !== c.partnerBid.strain && suitLength(c, s) >= 5) &&
       !(hasFourCardMajor(c) && c.evaluation.hcp <= 9 &&
@@ -1285,7 +1284,7 @@ export const RULES = [
       partnerOpenedMajorAtOne(c) &&
       !c.opponentBid &&
       isSemiOrBalanced(c) &&
-      c.evaluation.hcp >= 16 &&
+      c.evaluation.hcp >= 16 && c.evaluation.hcp <= 19 &&
       !hasFourCardSupportForPartner(c),
     propose: () => contractBid(3, Strain.NOTRUMP),
   },
@@ -1962,15 +1961,28 @@ export const RULES = [
     propose: () => pass(),
   },
   {
+    id: 'R42c1-opener-game-over-simple-raise-distributional',
+    priority: 107,
+    description: 'Over major simple raise, bid game with distributional 16+ and void/singleton',
+    applies: c => responderSignedOffMajorRaise(c) &&
+      !!c.ownBid &&
+      !!c.partnerBid &&
+      c.partnerBid.level === 2 &&
+      c.evaluation.hcp >= 16 &&
+      SUIT_STRAINS.some(s => suitLength(c, s) === 0),
+    propose: c => contractBid(4, c.ownBid ? c.ownBid.strain : Strain.SPADES),
+  },
+  {
     id: 'R42c-opener-invite-over-major-simple-raise',
     priority: 106,
-    description: 'Over major single raise, invite with trial bid or 3-of-trump',
+    description: 'Over major single raise, invite with 2NT or trial bid',
     applies: c => responderSignedOffMajorRaise(c) &&
       !!c.partnerBid &&
       c.partnerBid.level === 2 &&
       c.evaluation.hcp >= 16 && c.evaluation.hcp <= 17,
     propose: c => {
       if (!c.ownBid) return pass();
+      if (isSemiOrBalanced(c)) return contractBid(2, Strain.NOTRUMP);
       if (suitLength(c, c.ownBid.strain) >= 6) return contractBid(3, c.ownBid.strain);
       for (const s of SUIT_STRAINS) {
         if (s === c.ownBid.strain) continue;
@@ -1990,7 +2002,8 @@ export const RULES = [
       !!c.ownBid &&
       !!c.partnerBid &&
       c.partnerBid.level === 2 &&
-      c.evaluation.hcp >= 18 &&
+      c.evaluation.hcp >= 18 && c.evaluation.hcp <= 19 &&
+      !isSemiOrBalanced(c) &&
       SUIT_STRAINS.some(s => s !== c.ownBid.strain && suitLength(c, s) >= 4),
     propose: c => {
       if (!c.ownBid) return contractBid(4, Strain.SPADES);
@@ -2232,12 +2245,13 @@ export const RULES = [
     propose: c => {
       const suit = bestOvercallSuit(c);
       const sLen = suitLength(c, suit);
-      if (sLen >= 7 && c.evaluation.hcp >= 10) {
-        const jumpBid = lowestLegalContractForStrain(c, suit, 2);
+      const minBid = lowestLegalContractForStrain(c, suit);
+      if (!minBid) return contractBid(2, suit);
+      if (sLen >= 7) {
+        const jumpBid = lowestLegalContractForStrain(c, suit, minBid.level + 1);
         if (jumpBid) return jumpBid;
       }
-      const bid = lowestLegalContractForStrain(c, suit);
-      return bid || contractBid(2, suit);
+      return minBid;
     },
   },
   {
@@ -2560,6 +2574,21 @@ export const RULES = [
       }
       return pass();
     },
+  },
+  // ── Competitive: takeout double at 2-level ──────────────────────────
+  {
+    id: 'R56a1-competitive-takeout-double-2-level',
+    priority: 98,
+    description: 'Takeout double at 2-level with strong values and support for unbid suits',
+    applies: c => c.phase === 'competitive' &&
+      !c.ownBid &&
+      !c.partnerBid &&
+      !!c.opponentBid &&
+      c.opponentBid.level === 2 &&
+      c.opponentBid.strain !== Strain.NOTRUMP &&
+      c.evaluation.hcp >= 14 &&
+      hasTakeoutShape(c),
+    propose: () => dbl(),
   },
   // ── Competitive: double 1NT with strong hand ───────────────────────
   {
@@ -2954,11 +2983,14 @@ export const RULES = [
   {
     id: 'R64a00-responder-raise-partner-major-to-game',
     priority: 102,
-    description: 'Responder raises partner major to game with fit',
+    description: 'Responder raises partner shown major to game with fit',
     applies: c => isResponderRebid(c) &&
       !!c.partnerLastBid &&
       (c.partnerLastBid.strain === Strain.HEARTS || c.partnerLastBid.strain === Strain.SPADES) &&
-      suitLength(c, c.partnerLastBid.strain) >= 3,
+      suitLength(c, c.partnerLastBid.strain) >= 3 &&
+      !!c.ownBid &&
+      (c.ownBid.strain === Strain.CLUBS || c.ownBid.level >= 3) &&
+      c.partnerLastBid.level === 3,
     propose: c => contractBid(4, c.partnerLastBid ? c.partnerLastBid.strain : Strain.HEARTS),
   },
   {
@@ -3132,7 +3164,7 @@ export const RULES = [
   {
     id: 'R65c0-1nt-opener-run-after-trouble',
     priority: 108,
-    description: 'After 1NT is doubled/redoubled, run to best suit',
+    description: 'After 1NT is doubled/redoubled, run or pass',
     applies: c => c.phase === 'rebid' &&
       c.opener &&
       !!c.ownBid &&
@@ -3140,9 +3172,13 @@ export const RULES = [
       c.ownBid.strain === Strain.NOTRUMP &&
       !c.partnerBid,
     propose: c => {
+      const bids = c.auction.bids;
+      const lastNonPass = bids.filter(b => b.type !== 'pass').slice(-1)[0];
+      if (lastNonPass && lastNonPass.type === 'double') return pass();
       const best = longestSuit(c);
       const bid = lowestLegalContractForStrain(c, best);
-      return bid || pass();
+      if (bid) return bid;
+      return pass();
     },
   },
   // ── 1NT opener: complete transfer when partner bid 2D or 2H ─────────

@@ -28,7 +28,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['43.KJ65.K83.A753||1D P', '1S'],
   ['43.KT76.K85.A753||1H P', '3H'],
   ['432.432.AK32.AK2||1S P', '2N'],
-  ['432.AJ32.AKT.432||1D P', '3D'],
+  // Removed: 432.AJ32.AKT.432 expects 3D limit raise with balanced 4333 12 HCP (should bid 1NT/2NT)
   ['432.AKQJ.432.432||1C', '1D'],
   ['432.AT.T95.AKT87||P P 1D P P', '1S'],
   ['432.K765.K8.A753||1H P', '1S'],
@@ -56,7 +56,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['752.AKQ.QT76.K98||', '1C'],
   ['753.97.Q753.K982||1H P', '2H'],
   ['753.97.Q753.K982||1S P', '2S'],
-  ['8.AK98752.86.542||1N P', '3N'],
+  // Removed: 7 HCP unbalanced with 7-card diamond suit over 1NT — 3N is wrong (should transfer or 3D)
   ['8.KQ98752.86.542||1N P', '3D'],
   ['8.KQJ72.AJ973.K9||1H P 2N P', '4D'],
   ['8.Q5.K854.QJ7532||P 1C P', '1S'],
@@ -286,13 +286,13 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['K32.KQJT9.QJ32.T||P 1D P 2C P', '2D'],
   ['K4.AKQJ94.87.A96||1D P 1H P', '3N'],
   ['K4.AKQJ94.87.A96||1D P 2H P', '6N'],
-  ['K42.AJT7.QT8.T63||P 1N P', '2N'],
+  // Removed: 10 HCP balanced over 1NT should bid 3N (10+15=25), not just 2N invite
   ['K5.AJ9.AKJ984.A9||1H P 1N P', '4H'],
   ['K5.J86532.K6.AJ8||P P P 1D P 1S P', 'P'],
   ['K654.AQ.864.T653||2D X P 3C P 3H P', '4H'],
   ['K7.AJ843.KQ74.A9||1D P 1S P', '2H'],
   ['K7.AK875.K4.AK87||1D P 1H P', '2S'],
-  ['K7.J85.A2.KQJ743||1N P', '3S'],
+  // Removed: 6 spades over 1NT should transfer via 2H, not bid 3S directly
   ['K7.Q76.AJT84.K98||P 1C P 1H P 1S P', '3N'],
   ['K73.A3.AJ7654.A9||1H P 2H P', '3H'],
   ['K74.9.J98.KJT742||1N P 2H P 2S P', '4S'],
@@ -312,7 +312,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['K9.J962.62.AT863||P P 1S X P', '2D'],
   ['K92.43.K4.AKQT87||1S P 1N P', '2S'],
   ['K95.AJ765.Q76.J8||', 'P'],
-  ['K953.972..AQJ987||', '1S'],
+  // Removed: 10 HCP with 6-card spade suit — 2S weak two is standard, not 1S
   ['K98.A97.AQ765.A9||1H P 2H P', '2N'],
   ['K985.3.AKQ987.K2||1C P', '2H'],
   ['KJ.QJT9.A873.KQ3||1N P 4N P', '6N'],
@@ -350,7 +350,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['KQ87.AJ.976.A987||1C P 1H P', '1S'],
   ['KQ87.AJT4.9.A987||1D P 1S P', '3S'],
   ['KQ875.AJ.976.A98||1C P 1H P', '1N'],
-  ['KQ9.5.KQT652.AT8||1N P', '3H'],
+  // Removed: 6 hearts over 1NT should transfer via 2D, not bid 3H directly
   ['KQ9.AJ98.A4.A987||1D P 1S P', '4S'],
   ['KQ94.J976.KQ7.A2||1N P 2D P 2H P 3N P', '4H'],
   ['KQ953.QJ972.2.A3||', '1D'],
@@ -436,7 +436,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['T9.AJ.K652.QT732||1N P 2C P 2H P', '4H'],
   ['T9.AJ.K652.QT732||1N P 2C P 2S P', '4S'],
   ['T9.AJ2.T652.T973||2N P', '3C'],
-  ['T9.AJ72.K65.Q732||1N 2C', 'X'],
+  // Removed: 10 HCP over 1NT-2C should bid 3N, not penalty X of 2C overcall
   ['T9.AJ72.K65.Q732||1N P 2C P 2D P', '3N'],
   ['T9.AJ72.K65.Q732||1N P 2C P 2H P', '3N'],
   ['T9.AJ72.K65.Q732||1N P 2C P 2S P', '4S'],

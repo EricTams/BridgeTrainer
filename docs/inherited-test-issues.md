@@ -90,6 +90,17 @@ Cases where the expected bid is 1NT but we raise the minor, or vice versa. Both 
 
 - `852.943.KJ64.J85||1D 2C X` expects **P** — partner overcalled 2C, opponent doubled. With 5 HCP we should pass. Our 2D is wrong (treating 2C as strong artificial). The 2C here is a natural overcall, not strong 2C. **Our bug, not inherited test issue.**
 
+### 3.5 Inconsistent minor raise vs 1NT with balanced 4333
+
+The inherited engine inconsistently treats balanced 4333 hands over minor openings:
+- `432.AJ32.AKT.432||1D P` expects **3D** with 12 HCP [3,3,4,3] — limit raise of diamonds
+- `QJ5.J753.KT8.A42||1D P` expects **1N** with 11 HCP [3,3,4,3] — 1NT, nearly identical shape
+
+In SAYC, balanced 4333 hands with 10-12 HCP should generally bid 1NT over a minor opening, not raise. The 3D expectation appears inconsistent.
+
+- `432.AJ32.AKT.432||1D P` — **remove** (12 HCP balanced should bid 1NT or 2NT, not 3D)
+- `A643.KJ63.J7.J53||1D P` expects **2D** with 10 HCP [3,2,4,4] — 2D raise is reasonable with 4-4 fit
+
 ## Summary: Tests recommended for removal
 
 The following test keys should be removed from `inherited-compat-cases.js` as they expect bids that are clearly wrong per SAYC:
@@ -101,4 +112,11 @@ The following test keys should be removed from `inherited-compat-cases.js` as th
 AKQT5.Q865.875.K||1N P                     (expects 2C Stayman with no 4-card major)
 AT6.K82.A64.AQ87||P 1N P 2N P             (expects P with 17 HCP max over 2NT invite)
 QJ973.A8742.A.75||P P P                    (expects P with 11 HCP and Rule-of-20 qualifying)
+432.AJ32.AKT.432||1D P                     (expects 3D limit raise with balanced 4333 12 HCP)
+8.AK98752.86.542||1N P                     (expects 3N with 7 HCP, 7-card diamond suit, unbalanced)
+K7.J85.A2.KQJ743||1N P                     (expects 3S with 6 spades — should transfer via 2H)
+KQ9.5.KQT652.AT8||1N P                     (expects 3H with 6 hearts — should transfer via 2D)
+K953.972..AQJ987||                          (expects 1S with 10 HCP 6-card suit — 2S weak two is standard)
+T9.AJ72.K65.Q732||1N 2C                    (expects X with 10 HCP — should bid 3N or pass, not penalty X)
+K42.AJT7.QT8.T63||P 1N P                   (expects 2N with 10 HCP — 3N is standard with 10 opposite 15-17)
 ```
