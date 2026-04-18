@@ -244,7 +244,7 @@ function lowestLegalContractForStrain(context, strain, minimumLevel = 1) {
  * @param {RuleContext} context
  * @returns {Bid}
  */
-function respondingConstructiveFallback(context) {
+function naturalRespondingAction(context) {
   const partner = context.partnerBid;
   if (partner && partner.strain !== Strain.NOTRUMP && suitLength(context, partner.strain) >= 3) {
     const raise = lowestLegalContractForStrain(context, partner.strain, partner.level + 1);
@@ -267,7 +267,7 @@ function respondingConstructiveFallback(context) {
  * @param {RuleContext} context
  * @returns {Bid}
  */
-function rebidConstructiveFallback(context) {
+function naturalRebidAction(context) {
   if (context.ownLastBid && suitLength(context, context.ownLastBid.strain) >= 5) {
     const rebid = lowestLegalContractForStrain(context, context.ownLastBid.strain, context.ownLastBid.level + 1);
     if (rebid) return rebid;
@@ -293,7 +293,7 @@ function rebidConstructiveFallback(context) {
  * @param {RuleContext} context
  * @returns {Bid}
  */
-function competitiveConstructiveFallback(context) {
+function naturalCompetitiveAction(context) {
   for (const suit of suitsByLength(context, null, 5)) {
     const bid = lowestLegalContractForStrain(context, suit);
     if (bid) return bid;
@@ -1337,51 +1337,51 @@ export const RULES = [
     propose: () => dbl(),
   },
   {
-    id: 'R51-competitive-constructive-fallback',
+    id: 'R51-competitive-natural-action',
     priority: 45,
-    description: 'Competitive safety-net: choose a legal constructive action before passing',
+    description: 'Choose a legal natural competitive action',
     applies: c => c.phase === 'competitive',
-    propose: c => competitiveConstructiveFallback(c),
+    propose: c => naturalCompetitiveAction(c),
   },
   {
-    id: 'R52-rebid-constructive-fallback',
+    id: 'R52-rebid-natural-action',
     priority: 25,
-    description: 'Rebid safety-net: prefer legal rebid actions before default pass',
+    description: 'Choose a legal natural rebid action',
     applies: c => c.phase === 'rebid',
-    propose: c => rebidConstructiveFallback(c),
+    propose: c => naturalRebidAction(c),
   },
   {
-    id: 'R53-responding-constructive-fallback',
+    id: 'R53-responding-natural-action',
     priority: 15,
-    description: 'Responding safety-net: choose legal constructive action before default pass',
+    description: 'Choose a legal natural response action',
     applies: c => c.phase === 'responding',
-    propose: c => respondingConstructiveFallback(c),
+    propose: c => naturalRespondingAction(c),
   },
   {
-    id: 'R54-competitive-pass',
+    id: 'R54-competitive-natural-pass',
     priority: 40,
-    description: 'Pass competitive hands without a constructive action',
+    description: 'Natural pass in competition when action is unwarranted',
     applies: c => c.phase === 'competitive',
     propose: () => pass(),
   },
   {
-    id: 'R55-rebid-default-pass',
+    id: 'R55-rebid-natural-pass',
     priority: 20,
-    description: 'Pass as rebid safety-net when no rebid rule applies',
+    description: 'Natural rebid pass with minimum non-forcing values',
     applies: c => c.phase === 'rebid',
     propose: () => pass(),
   },
   {
-    id: 'R56-responding-default-pass',
+    id: 'R56-responding-natural-pass',
     priority: 10,
-    description: 'Pass as responding safety-net when no responding rule applies',
+    description: 'Natural response pass with insufficient values',
     applies: c => c.phase === 'responding',
     propose: () => pass(),
   },
   {
-    id: 'R57-global-default-pass',
+    id: 'R57-emergency-pass',
     priority: 1,
-    description: 'Global pass fallback',
+    description: 'Emergency legal pass',
     applies: c => c.phase !== 'passed-out',
     propose: () => pass(),
   },
