@@ -1246,7 +1246,8 @@ export const RULES = [
       isSemiOrBalanced(c) &&
       (!c.partnerBid || c.partnerBid.strain === Strain.NOTRUMP ||
        suitLength(c, c.partnerBid.strain) < 3 ||
-       (isBalancedContext(c) &&
+       (isBalancedContext(c) && suitLength(c, c.partnerBid.strain) <= 4 &&
+        c.evaluation.hcp <= 9 &&
         (c.partnerBid.strain === Strain.CLUBS || c.partnerBid.strain === Strain.DIAMONDS))) &&
       !SUIT_STRAINS.some(s => c.partnerBid && s !== c.partnerBid.strain && suitLength(c, s) >= 5) &&
       !(hasFourCardMajor(c) && c.evaluation.hcp <= 9 &&
@@ -1963,14 +1964,14 @@ export const RULES = [
   {
     id: 'R42c-opener-invite-over-major-simple-raise',
     priority: 106,
-    description: 'Over major single raise, invite with trial bid',
+    description: 'Over major single raise, invite with trial bid or 3-of-trump',
     applies: c => responderSignedOffMajorRaise(c) &&
       !!c.partnerBid &&
       c.partnerBid.level === 2 &&
       c.evaluation.hcp >= 16 && c.evaluation.hcp <= 17,
     propose: c => {
       if (!c.ownBid) return pass();
-      if (isSemiOrBalanced(c)) return contractBid(2, Strain.NOTRUMP);
+      if (suitLength(c, c.ownBid.strain) >= 6) return contractBid(3, c.ownBid.strain);
       for (const s of SUIT_STRAINS) {
         if (s === c.ownBid.strain) continue;
         if (suitLength(c, s) >= 4) {
@@ -3091,6 +3092,24 @@ export const RULES = [
     },
   },
 
+  // ── Opener rebid: strong action after interference ──────────────────────
+  {
+    id: 'R65b0-opener-compete-after-interference',
+    priority: 103,
+    description: 'Opener competes after opponent interference with strong hand',
+    applies: c => isOpenerRebid(c) &&
+      !!c.ownBid &&
+      !!c.opponentBid &&
+      !c.partnerBid &&
+      c.evaluation.hcp >= 16,
+    propose: c => {
+      if (!c.ownBid) return pass();
+      const best = bestLegalSuitBid(c, c.opponentBid ? c.opponentBid.strain : null, 4);
+      if (best) return best;
+      if (c.evaluation.hcp >= 18) return dbl();
+      return pass();
+    },
+  },
   // ── Opener rebid: game with very strong hand ───────────────────────────
   {
     id: 'R65b-opener-rebid-game-strong',
