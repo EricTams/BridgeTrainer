@@ -1583,19 +1583,20 @@ export const RULES = [
       if (!target) return pass();
       const len = suitLength(c, target);
       const hcp = c.evaluation.hcp;
-      if (hcp <= 7 && len <= 5) return pass();
-      if (hcp <= 5 && len >= 6) return pass();
+      if (hcp <= 5) return pass();
       if (hcp >= 6 && hcp <= 7 && len <= 5 && hasFiveCardSuitBesidesTarget(c, target)) {
         const secondSuit = longestSuitExcluding(c, target);
         const bid = lowestLegalContractForStrain(c, secondSuit);
         if (bid) return bid;
       }
+      if (hcp <= 7 && len <= 5) return pass();
       if (hcp <= 7 && len >= 6) return contractBid(3, target);
       if (hcp >= 8 && hcp <= 9 && len >= 6) return contractBid(4, target);
       if (hcp >= 8 && hcp <= 9) return contractBid(2, Strain.NOTRUMP);
       if (len >= 6 && hcp >= 10) return contractBid(4, target);
       if (hcp >= 10 && hasFiveCardSuitBesidesTarget(c, target)) {
-        return contractBid(4, target);
+        const secondSuit = longestSuitExcluding(c, target);
+        return contractBid(3, secondSuit);
       }
       if (hcp >= 10) return contractBid(3, Strain.NOTRUMP);
       return contractBid(3, Strain.NOTRUMP);
