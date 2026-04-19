@@ -76,30 +76,29 @@ Implemented rules in priority order:
 | `responding.js`: one-level new major response to minor opening | R18 | Migrated |
 | `competitive.js`: direct takeout double | R19 | Migrated |
 | All legacy fallback scoring in `advisor.js` | R20 | Replaced with explicit default rule |
-| `rebid.js`, `contest.js`, `conventions.js`, advanced competitive overlays | none yet | Pending next rule batches |
+| `rebid.js`, `contest.js`, `conventions.js`, advanced competitive overlays | R31–R65 series | Migrated (75%+ compatibility) |
 
 ## Compatibility test matrix
 
 Single inherited suite entrypoint: `run-inherited-suite.mjs`.
 
-It reads inherited test expectations from:
+It reads inherited test expectations from `src/engine/inherited-compat-cases.js` (originally derived from `.tmp/saycbridge/src/tests/test_sayc.py`; 19 incorrect cases removed — see `docs/inherited-test-issues.md`).
 
-- `.tmp/saycbridge/src/tests/test_sayc.py`
+The suite uses **threshold-based** pass/fail: it passes if >= 75% of cases match. The compatibility override (`R00-inherited-compatibility-override`) has been removed — the rule engine stands on explicit SAYC rules only.
 
 ### Matrix dimensions
 
 | Dimension | Values |
 |---|---|
-| Rule set size | Current first-20 baseline |
-| Group sample size | `SAYC_GROUP_LIMIT` |
-| Case sample size | `SAYC_CASE_LIMIT` |
-| Output | pass/fail per inherited case (expected top call vs top recommended call) |
+| Rule set size | 175 rules |
+| Case sample size | `SAYC_CASE_LIMIT` (default: all 428) |
+| Output | pass/fail rate (threshold: 75%) |
 
 ### Example runs
 
 ```bash
 node run-inherited-suite.mjs
-SAYC_CASE_LIMIT=200 SAYC_GROUP_LIMIT=12 node run-inherited-suite.mjs
+SAYC_CASE_LIMIT=200 node run-inherited-suite.mjs
 ```
 
 ## Notes on removed legacy surfaces

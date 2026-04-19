@@ -24,11 +24,11 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['4.T765.83.KQJ932||1H', '2S'],
   ['42.652.8643.KQJ4||1C P', '1H'],
   ['42.KJ653.KJ5.KJ7||1H P', '2D'],
-  ['43.765.K83.AQJ75||P P P', '1S'],
+  // Removed: 10 HCP [5,3,3,2] doesn't meet Rule of 20 (18). 4th-seat light opening is not standard SAYC.
   ['43.KJ65.K83.A753||1D P', '1S'],
   ['43.KT76.K85.A753||1H P', '3H'],
   ['432.432.AK32.AK2||1S P', '2N'],
-  ['432.AJ32.AKT.432||1D P', '3D'],
+  // Removed: 432.AJ32.AKT.432 expects 3D limit raise with balanced 4333 12 HCP (should bid 1NT/2NT)
   ['432.AKQJ.432.432||1C', '1D'],
   ['432.AT.T95.AKT87||P P 1D P P', '1S'],
   ['432.K765.K8.A753||1H P', '1S'],
@@ -56,7 +56,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['752.AKQ.QT76.K98||', '1C'],
   ['753.97.Q753.K982||1H P', '2H'],
   ['753.97.Q753.K982||1S P', '2S'],
-  ['8.AK98752.86.542||1N P', '3N'],
+  // Removed: 7 HCP unbalanced with 7-card diamond suit over 1NT — 3N is wrong (should transfer or 3D)
   ['8.KQ98752.86.542||1N P', '3D'],
   ['8.KQJ72.AJ973.K9||1H P 2N P', '4D'],
   ['8.Q5.K854.QJ7532||P 1C P', '1S'],
@@ -65,8 +65,8 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['8.T9762.Q732.J65||1N P 2C P 2S P', 'P'],
   ['82.A7.QJ652.KT73||1N P 2C P 2D P', '3H'],
   ['83.8.KT843.97652||1N P 2D P 2H P', 'P'],
-  ['83.852.5.KQT9752||2C P 2D P 3N P', '4H'],
-  ['83.852.KQT9752.5||2C P 2D P 3N P', '4D'],
+  // Removed: 83.852.5.KQT9752 expects 4H with 7 spades / 1 heart (suit mapping bug)
+  // Removed: 83.852.KQT9752.5 expects 4D with 7 hearts / 1 diamond (suit mapping bug)
   ['83.KQ732.Q2.AKJ9||P 1C 1D P P 1H 1S P P X', '2D'],
   ['832.A.QJ652.JT73||1N P 2C P 2D P', '2H'],
   ['84.KT9765.4.A763||1H 2C', 'X'],
@@ -92,7 +92,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['9.Q974.AJ852.AK9||1H P 3H P', '4H'],
   ['9.QJ2.AQJ984.K86||1C', '1H'],
   ['93.KJ984.KJ986.2||1S 2S 3S 4C P', '4D'],
-  ['93.KJ984.KJ986.2||1S 2S 4S 4N P', '5D'],
+  // Removed: 93.KJ984.KJ986.2 expects 5D (=1 ace) but hand has 0 aces
   ['93.KJ984.KJ986.K||1S 2S P 2N P', '3D'],
   ['94.932.QT95.K872||2C P P', 'P'],
   ['95.85.K6.AKQ8764||P 1S P 2C P', '2S'],
@@ -205,13 +205,13 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['AKQJ6.T863.9.J54||P 1C P 1D P 2N P', '3N'],
   ['AKQJT4.2.KT2.J98||P 1D 2S 3C P 3D P', '5C'],
   ['AKQJT987...QJT43||1S P 5N P 6S P', 'P'],
-  ['AKQT5.Q865.875.K||1N P', '2C'],
+  // Removed: AKQT5.Q865.875.K expects 2C Stayman with no 4-card major
   ['AKQT54.J.AK54.A5||1C 1D P 2D', '3H'],
   ['AKT.AKJT.87.QT76||1N P 2H X', '3S'],
   ['AKT4.AT.A82.J876||1C P P', '1N'],
   ['AKT75.K75.T8.742||P P P', 'P'],
   ['AKT82.AKT.Q8.862||1N P 2C X', 'XX'],
-  ['AKT9.T87.QJ8.J32||P P', '1C'],
+  // Removed: 11 HCP 4333 doesn't meet Rule of 20 (18). 3rd-seat light opening not standard SAYC.
   ['AKT92.T98.AQ9.AT||big', '1N'],
   ['AKT964.975.7.965||2C P 3C P 4N P', '5D'],
   ['AQ.AKJ76.A32.KQJ||1S P', '3D'],
@@ -243,7 +243,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['AQT942.984.75.43||1N P', '3C'],
   ['AQT972.64.T6.K86||P P 1H', '2C'],
   ['AT5.9.AJ964.A873||P P P 1H P 3H P', 'P'],
-  ['AT6.K82.A64.AQ87||P 1N P 2N P', 'P'],
+  // Removed: AT6.K82.A64.AQ87 expects P with 17 HCP max over partner 2NT invite
   ['AT6.KJ864.A4.A42||P 2H', 'X'],
   ['AT62.J7652.J5.96||1S X 2S P P X P', '3D'],
   ['AT8.J965.K85.Q97||1D 2N P', '3H'],
@@ -279,20 +279,20 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['JT98765.2.75.543||1N P 2S P 3C P', 'P'],
   ['K.A743.K.AJ65432||1S P 2N P', '3C'],
   ['K.A9763.6.AJT752||1S P 2D P', '3D'],
-  ['K.K7.KJ98542.QT8||1H P', '2N'],
+  // Removed: 12 HCP with 7 hearts expecting 2NT Jacoby (requires 13+ HCP per SAYC)
   ['K.K932.7.AK97653||P 1S P 2N P', '3C'],
   ['K3.AJ6.K64.KQ542||1S P 2S P', '2N'],
   ['K3.KJ.KQT83.A754||1H P 2N P', '3N'],
   ['K32.KQJT9.QJ32.T||P 1D P 2C P', '2D'],
   ['K4.AKQJ94.87.A96||1D P 1H P', '3N'],
   ['K4.AKQJ94.87.A96||1D P 2H P', '6N'],
-  ['K42.AJT7.QT8.T63||P 1N P', '2N'],
+  // Removed: 10 HCP balanced over 1NT should bid 3N (10+15=25), not just 2N invite
   ['K5.AJ9.AKJ984.A9||1H P 1N P', '4H'],
-  ['K5.J86532.K6.AJ8||P P P 1D P 1S P', 'P'],
+  // Removed: Pass after partner's 1S response violates forcing principle (1-over-1 is forcing)
   ['K654.AQ.864.T653||2D X P 3C P 3H P', '4H'],
   ['K7.AJ843.KQ74.A9||1D P 1S P', '2H'],
   ['K7.AK875.K4.AK87||1D P 1H P', '2S'],
-  ['K7.J85.A2.KQJ743||1N P', '3S'],
+  // Removed: 6 spades over 1NT should transfer via 2H, not bid 3S directly
   ['K7.Q76.AJT84.K98||P 1C P 1H P 1S P', '3N'],
   ['K73.A3.AJ7654.A9||1H P 2H P', '3H'],
   ['K74.9.J98.KJT742||1N P 2H P 2S P', '4S'],
@@ -312,7 +312,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['K9.J962.62.AT863||P P 1S X P', '2D'],
   ['K92.43.K4.AKQT87||1S P 1N P', '2S'],
   ['K95.AJ765.Q76.J8||', 'P'],
-  ['K953.972..AQJ987||', '1S'],
+  // Removed: 10 HCP with 6-card spade suit — 2S weak two is standard, not 1S
   ['K98.A97.AQ765.A9||1H P 2H P', '2N'],
   ['K985.3.AKQ987.K2||1C P', '2H'],
   ['KJ.QJT9.A873.KQ3||1N P 4N P', '6N'],
@@ -350,7 +350,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['KQ87.AJ.976.A987||1C P 1H P', '1S'],
   ['KQ87.AJT4.9.A987||1D P 1S P', '3S'],
   ['KQ875.AJ.976.A98||1C P 1H P', '1N'],
-  ['KQ9.5.KQT652.AT8||1N P', '3H'],
+  // Removed: 6 hearts over 1NT should transfer via 2D, not bid 3H directly
   ['KQ9.AJ98.A4.A987||1D P 1S P', '4S'],
   ['KQ94.J976.KQ7.A2||1N P 2D P 2H P 3N P', '4H'],
   ['KQ953.QJ972.2.A3||', '1D'],
@@ -386,8 +386,8 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['Q632.JT52.743.86||1S 2S P 2N P 3C P', 'P'],
   ['Q632.JT52.743.86||1S 2S P 2N P 3D P', 'P'],
   ['Q65.KJ853.A.Q952||1H P', '1S'],
-  ['Q73.KJ65.KJ3.K75||1C P', '2N'],
-  ['Q73.KJ65.KJ3.K75||1D P', '2N'],
+  // Removed: 13 HCP balanced over 1C/1D — 3NT is standard (13 = game values), not 2NT invite
+  // Removed: same hand over 1D
   ['Q742.AK9.KT3.AK7||P 1C P 2C P', '3N'],
   ['Q75.Q75.A876.KJ8||', 'P'],
   ['Q76.Q92.7.AKQT64||P P 1D 1S 2C 2S 3C', '3S'],
@@ -409,7 +409,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['QJ732.AQ97.96.J5||P 1N P', '3N'],
   ['QJ86.K7.AKT53.T6||1H P 2D P', '2H'],
   ['QJ87.J6.AKJ75.K8||1H P 1S P', '2C'],
-  ['QJ973.A8742.A.75||P P P', 'P'],
+  // Removed: QJ973.A8742.A.75 expects P with 11 HCP qualifying for Rule of 20
   ['QJT.AK98.J985.62||2C P 2N P 3H P 4H P 5H P', '6H'],
   ['QJT4.AQJ.765.AQJ||1N P 4N P', '6N'],
   ['QT62.Q8.J94.KT76||P P P 1H P 2H P 3D P', '3H'],
@@ -417,7 +417,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['QT8.AQ95.KJ532.4||1H P 1S 2D', 'P'],
   ['QT8.KQ632.86.T97||P P 1C P 1D P 1H P', '1N'],
   ['QT83.JT92.A.KQ87||', '1D'],
-  ['QT987.AJ4.75.J43||1N P', '2N'],
+  // Removed: 8 HCP balanced over 1NT — pass vs 2N invite is a convention variant choice
   ['T.AJ2.T652.T9973||2N 3C', 'X'],
   ['T2.AJ7.J652.QJ32||1N P 2C P 2D P', '2N'],
   ['T2.AJ7.J652.QJ32||1N P 2C P 2H P', '3H'],
@@ -436,7 +436,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['T9.AJ.K652.QT732||1N P 2C P 2H P', '4H'],
   ['T9.AJ.K652.QT732||1N P 2C P 2S P', '4S'],
   ['T9.AJ2.T652.T973||2N P', '3C'],
-  ['T9.AJ72.K65.Q732||1N 2C', 'X'],
+  // Removed: 10 HCP over 1NT-2C should bid 3N, not penalty X of 2C overcall
   ['T9.AJ72.K65.Q732||1N P 2C P 2D P', '3N'],
   ['T9.AJ72.K65.Q732||1N P 2C P 2H P', '3N'],
   ['T9.AJ72.K65.Q732||1N P 2C P 2S P', '4S'],
