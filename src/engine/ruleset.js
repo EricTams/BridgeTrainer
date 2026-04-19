@@ -1479,10 +1479,11 @@ export const RULES = [
   {
     id: 'R36-opener-rebid-2nt',
     priority: 112,
-    description: 'Opener rebids 2NT with invitational balanced strength',
+    description: 'Opener rebids 2NT with 18-19 balanced after new suit response',
     applies: c => isOpenerRebid(c) &&
-      c.evaluation.hcp >= 18 && c.evaluation.hcp <= 18 &&
-      isBalancedContext(c),
+      c.evaluation.hcp >= 18 && c.evaluation.hcp <= 19 &&
+      isBalancedContext(c) &&
+      !!c.partnerBid && c.partnerBid.strain !== c.ownBid?.strain,
     propose: () => contractBid(2, Strain.NOTRUMP),
   },
   {
@@ -1862,6 +1863,7 @@ export const RULES = [
       c.partnerBid.level === 3 &&
       (c.evaluation.hcp >= 14 ||
        (c.evaluation.hcp >= 11 && SUIT_STRAINS.some(s => suitLength(c, s) === 0)) ||
+       (c.evaluation.hcp >= 13 && SUIT_STRAINS.some(s => suitLength(c, s) <= 1)) ||
        (c.evaluation.hcp >= 13 && c.ownBid && suitLength(c, c.ownBid.strain) >= 7)),
     propose: c => contractBid(4, c.ownBid ? c.ownBid.strain : Strain.SPADES),
   },
@@ -2951,6 +2953,19 @@ export const RULES = [
   },
 
   // ── Opener rebid after minor raise: show new suit ───────────────────────
+  {
+    id: 'R65a01-opener-3nt-after-minor-raise',
+    priority: 107,
+    description: 'After partner raises minor, bid 3NT with strong balanced hand',
+    applies: c => isOpenerRebid(c) &&
+      !!c.ownBid &&
+      !!c.partnerBid &&
+      c.partnerBid.strain === c.ownBid.strain &&
+      (c.ownBid.strain === Strain.CLUBS || c.ownBid.strain === Strain.DIAMONDS) &&
+      c.evaluation.hcp >= 19 &&
+      isSemiOrBalanced(c),
+    propose: () => contractBid(3, Strain.NOTRUMP),
+  },
   {
     id: 'R65a00-opener-new-suit-after-minor-raise',
     priority: 106,
