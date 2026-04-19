@@ -1221,10 +1221,12 @@ export const RULES = [
   {
     id: 'R24d-respond-pass-without-values-over-minor',
     priority: 120,
-    description: 'Pass with very weak values after partner one-level minor opening',
+    description: 'Pass with very weak balanced values after partner one-level minor opening',
     applies: c => isResponderFirstTurn(c) &&
       partnerOpenedMinorAtOne(c) &&
-      c.evaluation.hcp <= 5,
+      c.evaluation.hcp <= 5 &&
+      !hasFourCardMajor(c) &&
+      !(c.partnerBid && suitLength(c, c.partnerBid.strain) >= 5),
     propose: () => pass(),
   },
   {
@@ -1255,12 +1257,12 @@ export const RULES = [
   {
     id: 'R26-respond-limit-raise',
     priority: 121,
-    description: 'Limit raise with 3+ support for major or 4+ for minor, 10-12',
+    description: 'Limit raise with 4+ support for major or 5+ for minor, 10-12',
     applies: c => isResponderFirstTurn(c) && partnerOpenedSuitAtOne(c) &&
       !c.opponentBid &&
       c.evaluation.hcp >= 10 && c.evaluation.hcp <= 12 &&
       ((c.partnerBid && (c.partnerBid.strain === Strain.HEARTS || c.partnerBid.strain === Strain.SPADES) &&
-        suitLength(c, c.partnerBid.strain) >= 3) ||
+        suitLength(c, c.partnerBid.strain) >= 4) ||
        (c.partnerBid && (c.partnerBid.strain === Strain.CLUBS || c.partnerBid.strain === Strain.DIAMONDS) &&
         suitLength(c, c.partnerBid.strain) >= 5)),
     propose: c => contractBid(3, c.partnerBid ? c.partnerBid.strain : Strain.CLUBS),
@@ -1299,18 +1301,19 @@ export const RULES = [
   {
     id: 'R28a-respond-jump-shift-strong',
     priority: 124,
-    description: 'Jump shift response with 16+ and 5+ suit over minor opening',
+    description: 'Jump shift response with 16+ and 5+ suit',
     applies: c => isResponderFirstTurn(c) && partnerOpenedSuitAtOne(c) &&
       c.evaluation.hcp >= 16 &&
       !c.opponentBid &&
       !!c.partnerBid &&
-      (c.partnerBid.strain === Strain.CLUBS || c.partnerBid.strain === Strain.DIAMONDS) &&
-      SUIT_STRAINS.some(s => s !== c.partnerBid.strain && suitLength(c, s) >= 5),
+      SUIT_STRAINS.some(s => s !== c.partnerBid.strain && suitLength(c, s) >= 5) &&
+      !hasFourCardSupportForPartner(c),
     propose: c => {
       const partner = c.partnerBid;
       if (!partner) return contractBid(2, longestSuit(c));
       for (const s of suitsByLength(c, partner.strain, 5)) {
-        return contractBid(2, s);
+        const normalLevel = suitOrderIndex(s) > suitOrderIndex(partner.strain) ? 1 : 2;
+        return contractBid(normalLevel + 1, s);
       }
       return contractBid(2, longestSuit(c));
     },

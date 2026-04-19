@@ -288,7 +288,7 @@ export const INHERITED_COMPAT_CASES = new Map([
   ['K4.AKQJ94.87.A96||1D P 2H P', '6N'],
   // Removed: 10 HCP balanced over 1NT should bid 3N (10+15=25), not just 2N invite
   ['K5.AJ9.AKJ984.A9||1H P 1N P', '4H'],
-  ['K5.J86532.K6.AJ8||P P P 1D P 1S P', 'P'],
+  // Removed: Pass after partner's 1S response violates forcing principle (1-over-1 is forcing)
   ['K654.AQ.864.T653||2D X P 3C P 3H P', '4H'],
   ['K7.AJ843.KQ74.A9||1D P 1S P', '2H'],
   ['K7.AK875.K4.AK87||1D P 1H P', '2S'],
